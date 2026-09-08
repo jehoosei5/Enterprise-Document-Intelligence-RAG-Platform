@@ -44,7 +44,13 @@ def ensure_collection() -> None:
             ),
         },
         sparse_vectors_config={
-            "sparse": qmodels.SparseVectorParams(),
+            # IDF modifier: fastembed's BM25 encoder stores raw term
+            # frequencies; this tells Qdrant to apply corpus-wide IDF
+            # weighting at query time, which is what makes it BM25 rather
+            # than plain term-frequency matching.
+            "sparse": qmodels.SparseVectorParams(
+                modifier=qmodels.Modifier.IDF,
+            ),
         },
     )
 
@@ -84,20 +90,42 @@ def _chunk_payload(chunk: Chunk) -> dict:
     }
 
 
-def upsert_chunks(chunks: list[Chunk], dense_vectors: list[list[float]]) -> None:
+def upsert_chunks(
+    chunks: list[Chunk],
+    dense_vectors: list[list[float]],
+    sparse_vectors: list[qmodels.SparseVector],
+) -> None:
     settings = get_settings()
     client = get_client()
 
     points = [
         qmodels.PointStruct(
             id=str(uuid.uuid4()),
-            vector={"dense": vector},
+            vector={"dense": dense, "sparse": sparse},
             payload=_chunk_payload(chunk),
         )
-        for chunk, vector in zip(chunks, dense_vectors, strict=True)
+        for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors, strict=True)
     ]
     if points:
         client.upsert(collection_name=settings.qdrant_collection_name, points=points)
+
+
+def _to_retrieved_chunk(point) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=str(point.id),
+        score=point.score,
+        text=point.payload["text"],
+        doc_id=point.payload["doc_id"],
+        filename=point.payload["filename"],
+        source_format=point.payload["source_format"],
+        heading_path=point.payload.get("heading_path", []),
+        page_start=point.payload.get("page_start"),
+        page_end=point.payload.get("page_end"),
+        line_start=point.payload.get("line_start"),
+        line_end=point.payload.get("line_end"),
+        row_start=point.payload.get("row_start"),
+        row_end=point.payload.get("row_end"),
+    )
 
 
 def search_dense(query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
@@ -112,24 +140,32 @@ def search_dense(query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         with_payload=True,
     ).points
 
-    return [
-        RetrievedChunk(
-            chunk_id=str(point.id),
-            score=point.score,
-            text=point.payload["text"],
-            doc_id=point.payload["doc_id"],
-            filename=point.payload["filename"],
-            source_format=point.payload["source_format"],
-            heading_path=point.payload.get("heading_path", []),
-            page_start=point.payload.get("page_start"),
-            page_end=point.payload.get("page_end"),
-            line_start=point.payload.get("line_start"),
-            line_end=point.payload.get("line_end"),
-            row_start=point.payload.get("row_start"),
-            row_end=point.payload.get("row_end"),
-        )
-        for point in results
-    ]
+    return [_to_retrieved_chunk(point) for point in results]
+
+
+def search_hybrid(
+    dense_vector: list[float],
+    sparse_vector: qmodels.SparseVector,
+    fetch_k: int,
+) -> list[RetrievedChunk]:
+    """Dense + sparse (BM25) search fused server-side via Reciprocal Rank
+    Fusion, in one Qdrant Query API call.
+    """
+    settings = get_settings()
+    client = get_client()
+
+    results = client.query_points(
+        collection_name=settings.qdrant_collection_name,
+        prefetch=[
+            qmodels.Prefetch(query=dense_vector, using="dense", limit=fetch_k),
+            qmodels.Prefetch(query=sparse_vector, using="sparse", limit=fetch_k),
+        ],
+        query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
+        limit=fetch_k,
+        with_payload=True,
+    ).points
+
+    return [_to_retrieved_chunk(point) for point in results]
 
 
 def delete_document(doc_id: str) -> None:

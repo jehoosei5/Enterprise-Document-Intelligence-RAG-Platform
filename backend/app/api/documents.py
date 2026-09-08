@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.db.models import Document, DocumentStatus, SourceFormat
 from app.db.session import get_db
 from app.embeddings.azure_embeddings import embed_texts
+from app.embeddings.sparse_embeddings import embed_texts as sparse_embed_texts
 from app.ingestion.dispatch import SUPPORTED_EXTENSIONS, UnsupportedFileTypeError, parse_document
 from app.retrieval.qdrant_store import upsert_chunks
 from app.schemas.documents import DocumentOut, DocumentUploadResponse
@@ -49,8 +50,10 @@ def upload_document(file: UploadFile, db: Session = Depends(get_db)) -> Document
             target_tokens=settings.chunk_target_tokens,
             overlap_tokens=settings.chunk_overlap_tokens,
         )
-        vectors = embed_texts([c.text for c in chunks])
-        upsert_chunks(chunks, vectors)
+        texts = [c.text for c in chunks]
+        dense_vectors = embed_texts(texts)
+        sparse_vectors = sparse_embed_texts(texts)
+        upsert_chunks(chunks, dense_vectors, sparse_vectors)
 
         document.page_count = ingested.page_count
         document.ocr_used = ingested.ocr_used

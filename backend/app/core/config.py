@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     qdrant_api_key: str = ""
     qdrant_collection_name: str = "enterprise-rag"
 
-    # --- Cohere (reserved for v2) ---
+    # --- Cohere (reranker) ---
     cohere_api_key: str = ""
-    cohere_rerank_model: str = "rerank-multilingual-v2.0"
+    cohere_rerank_model: str = "rerank-v3.5"
 
     # --- MySQL ---
     database_url: str = "mysql+pymysql://root:root@localhost:3306/ragdb"
@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # --- Retrieval ---
     default_top_k: int = 5
+    hybrid_fetch_k: int = 20  # candidates fetched from fusion before reranking down to top_k
 
     @property
     def upload_path(self) -> Path:

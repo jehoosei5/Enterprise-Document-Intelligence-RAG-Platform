@@ -16,5 +16,6 @@ class SourceOut(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceOut]
+    rewritten_query: str
     input_tokens: int
     output_tokens: int
