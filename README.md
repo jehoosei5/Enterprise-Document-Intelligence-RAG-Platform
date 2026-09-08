@@ -18,6 +18,9 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
        → evaluate → log/serve
 ```
 
+**Status: v1 (core pipeline) and v2 (retrieval quality) are built and
+verified.** v3–v4b are not started yet — see [Build plan](#build-plan).
+
 ## Tech stack
 
 | Layer | Choice |
@@ -26,65 +29,125 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
 | LLM (generation, query rewriting, embeddings) | Azure OpenAI |
 | Reranker | Cohere Rerank API |
 | Vector + hybrid (dense + sparse/BM25) search | Qdrant Cloud |
-| Relational store (users, documents, permissions, eval logs) | Postgres on Railway |
-| Frontend | React + Vite + TypeScript |
+| Relational store (users, documents, permissions, eval logs) | MySQL — local for dev, Railway once deployed |
+| Frontend | React + Vite + TypeScript (not started — v1 is API-only) |
 
-No local infra is required to run this beyond the backend/frontend
-processes themselves — Postgres, Qdrant, Azure OpenAI, and Cohere are all
-managed/cloud services, configured via environment variables.
+No local infra is required beyond a local MySQL install for dev — Qdrant,
+Azure OpenAI, and Cohere are all managed/cloud services, configured via
+environment variables.
 
 ## Project structure
 
 ```
 backend/
   app/
-    api/           # FastAPI routers
-    core/          # config, settings
-    ingestion/      # format-specific parsers -> common intermediate representation
-    chunking/       # structure-aware / fixed-size chunkers
-    embeddings/     # Azure OpenAI embedding client
-    retrieval/      # Qdrant hybrid search, query rewriting, reranking
-    generation/     # LLM answer generation with citations
-    db/             # SQLAlchemy models, session
-    schemas/        # Pydantic request/response models
-  alembic/          # DB migrations
-  tests/
-frontend/           # React + Vite + TS app (chat UI + eval/debug dashboard)
+    core/config.py       # pydantic-settings, reads backend/.env
+    db/                   # SQLAlchemy models (Document) + session
+    ingestion/             # format-specific parsers -> common IR (common.py)
+      pdf.py                 # PyMuPDF + pytesseract OCR fallback for scans
+      docx_parser.py          # python-docx, heading-aware
+      markdown_parser.py      # markdown-it-py, heading-aware
+      text_csv.py             # plain text (line ranges) + CSV (row ranges)
+      dispatch.py             # picks parser by file extension
+    chunking/chunker.py    # structure-aware (MD/DOCX) + fixed-size (PDF/text/CSV)
+    embeddings/
+      azure_embeddings.py     # Azure OpenAI dense embeddings, auto-detects dimension
+      sparse_embeddings.py     # local BM25 sparse vectors via fastembed (Qdrant/bm25)
+    retrieval/
+      qdrant_store.py          # collection mgmt (dense+sparse), upsert, dense + RRF hybrid search
+      query_rewrite.py          # single-turn query rewrite (Azure OpenAI)
+      reranker.py                # Cohere cross-encoder rerank, fails open to fused order
+    generation/generator.py    # Azure OpenAI chat + [n]-citation mapping
+    api/                    # documents.py, query.py, health.py
+    schemas/                # Pydantic request/response models
+    main.py                 # FastAPI app + router wiring
+  alembic/                # DB migrations
+  tests/                  # pytest unit tests (ingestion, chunking) + fixtures/
+  requirements.txt
+  .env.example / .env     # .env is git-ignored
+frontend/                 # not started yet (v1 is backend/API-only)
 ```
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and fill in:
+1. **Environment variables** — copy `backend/.env.example` to `backend/.env`
+   and fill in:
    - Azure OpenAI endpoint, API key, and deployment names (chat + embeddings)
    - Qdrant Cloud URL + API key
-   - Cohere API key
-   - Railway Postgres `DATABASE_URL`
-   - A JWT secret (for v3 auth)
-2. Backend:
+   - Cohere API key (used for reranking)
+   - `DATABASE_URL` — for local dev, point at a local MySQL instance
+     (`mysql+pymysql://root:<password>@localhost:3306/ragdb`, after running
+     `CREATE DATABASE ragdb;`); once deployed on Railway, the backend
+     service's own env vars should reference the MySQL plugin's internal
+     URL instead (`mysql.railway.internal` only resolves inside Railway's
+     private network, not from your machine)
+   - A JWT secret (reserved for v3)
+
+2. **Backend**:
    ```
    cd backend
    python -m venv venv
-   venv\Scripts\activate      # Windows
+   venv\Scripts\activate          # Windows
    pip install -r requirements.txt
+   alembic upgrade head            # creates the documents table
+   venv\Scripts\uvicorn.exe app.main:app --reload
    ```
-3. Frontend (added once scaffolded): `cd frontend && npm install`
+   > If a bare `uvicorn` command picks up a different Python (e.g. Anaconda)
+   > even after activating the venv, call `venv\Scripts\uvicorn.exe`
+   > directly — it bypasses `PATH` resolution entirely.
+
+3. **Tests** (pure unit tests, no external API calls):
+   ```
+   venv\Scripts\pytest.exe tests/ -v
+   ```
+
+4. **Frontend**: not built yet — v1 is backend/API-only, verified via
+   `pytest` + `curl`.
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | DB + Qdrant connectivity check |
+| `POST /documents` | Upload a file (`multipart/form-data`, field `file`) — parses, chunks, embeds (dense + sparse), indexes, and returns the document record |
+| `GET /documents` | List uploaded documents |
+| `GET /documents/{id}` | Get one document's status |
+| `POST /query` | `{"question": "...", "top_k": 5}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF), reranked (Cohere), then answered with `[n]` citations. Response includes `rewritten_query` alongside `answer`/`sources` |
 
 ## Build plan
 
-**v1 — Core RAG pipeline**
-- Multi-format ingestion: PDF (+ OCR fallback for scans), DOCX, Markdown,
-  plain text/CSV — each parsed into a common intermediate representation
-  (text, section/page, source metadata)
-- Structure-aware chunking where possible (headers for MD/DOCX, not blind
-  fixed-size)
-- Embeddings → vector DB
-- Basic retrieval → LLM generation with citations (page/section/line-range
-  depending on format)
+**v1 — Core RAG pipeline ✅ done**
+- Multi-format ingestion: PDF (+ OCR fallback for scans — needs the
+  Tesseract binary installed separately, not yet present on the dev
+  machine), DOCX, Markdown, plain text/CSV — each parsed into a common
+  intermediate representation (text, section/page, source metadata)
+- Structure-aware chunking where possible (headers for MD/DOCX), page-safe
+  fixed-size chunking for PDF/text/CSV
+- Embeddings (Azure OpenAI, dimension auto-detected) → Qdrant (dense +
+  reserved sparse vector slot for v2)
+- Retrieval → LLM generation with inline citations (page/section/line-range/
+  row-range depending on format)
+- MySQL tracks document-level metadata only; Qdrant payload is the source
+  of truth for chunk text + citation locators
+- Verified end-to-end against real Azure OpenAI, Qdrant Cloud, and local
+  MySQL: all 5 formats upload successfully, and `/query` answers are
+  correctly grounded and cited to the right document/location
 
-**v2 — Retrieval quality**
-- Query rewriting
-- Hybrid search: vector + BM25 in parallel (Qdrant dense + sparse vectors)
-- Reranker (Cohere) narrows combined results to top-k
+**v2 — Retrieval quality ✅ done**
+- Query rewriting: single-turn Azure OpenAI call (typo/acronym cleanup,
+  makes intent explicit) — not conversation-aware, that's v4b's job. Used
+  for retrieval only; generation still answers the user's original wording
+- Hybrid search: dense (Azure OpenAI embeddings) + sparse BM25
+  (`fastembed`'s `Qdrant/bm25`, local, no API key) fused server-side via
+  Qdrant's Query API (`prefetch` + Reciprocal Rank Fusion) in one call
+- Reranker: Cohere cross-encoder narrows the fused candidates
+  (`hybrid_fetch_k`, default 20) down to the final `top_k` (default 5);
+  both query rewrite and rerank fail open (fall back to unmodified
+  query / fused order) rather than failing the request
+- Verified end-to-end: hybrid fusion smoke-tested directly against Qdrant,
+  reranker confirmed to actually reorder by relevance, paraphrased and
+  keyword-heavy queries both retrieve correctly via `/query`, and a bad
+  Cohere key confirmed to degrade gracefully instead of erroring
 
 **v3 — Access control**
 - Authentication
