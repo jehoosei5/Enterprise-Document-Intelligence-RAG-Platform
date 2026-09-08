@@ -1,0 +1,42 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- DB ---
+sqlalchemy==2.0.36
+PyMySQL==1.1.1
+cryptography==44.0.0    # required by PyMySQL for MySQL's default sha2 auth
+alembic==1.14.0
+
+# --- LLM / embeddings (Azure OpenAI via the official openai SDK) ---
+openai==1.58.1
+tiktoken==0.8.0
+
+# --- Vector store (dense + sparse/BM25 hybrid) ---
+qdrant-client==1.12.1
+fastembed==0.4.2       # local BM25 sparse-vector encoder, pairs with qdrant-client
+
+# --- Reranker ---
+cohere==5.13.4
+
+# --- Document parsing ---
+pymupdf==1.25.1        # PDF text + page rasterization for OCR fallback
+pytesseract==0.3.13     # OCR (requires the Tesseract binary installed on the host)
+Pillow==11.0.0
+python-docx==1.1.2
+markdown-it-py==3.0.0
+
+# --- Auth (v3) ---
+pyjwt==2.10.1
+passlib[bcrypt]==1.7.4
+
+# --- Utilities ---
+tenacity==9.0.0
+python-dotenv==1.0.1
+
+# --- Dev / test ---
+pytest==8.3.4
+httpx==0.28.1
