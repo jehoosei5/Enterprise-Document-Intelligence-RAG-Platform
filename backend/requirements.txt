@@ -25,7 +25,7 @@ cohere==5.13.4
 # --- Document parsing ---
 pymupdf==1.25.1        # PDF text + page rasterization for OCR fallback
 pytesseract==0.3.13     # OCR (requires the Tesseract binary installed on the host)
-Pillow==11.0.0
+Pillow==10.4.0          # capped <11 by fastembed's onnxruntime-adjacent deps
 python-docx==1.1.2
 markdown-it-py==3.0.0
 

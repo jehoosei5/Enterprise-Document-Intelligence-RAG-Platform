@@ -1,0 +1,7 @@
+Line one of the plain text fixture.
+Line two, still in the first block.
+Line three closes out block one.
+Line four starts nothing special.
+Line five is the last of block one.
+Line six begins the second block.
+Line seven continues it.
