@@ -26,11 +26,11 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
 | LLM (generation, query rewriting, embeddings) | Azure OpenAI |
 | Reranker | Cohere Rerank API |
 | Vector + hybrid (dense + sparse/BM25) search | Qdrant Cloud |
-| Relational store (users, documents, permissions, eval logs) | MySQL on Railway |
+| Relational store (users, documents, permissions, eval logs) | Postgres on Railway |
 | Frontend | React + Vite + TypeScript |
 
 No local infra is required to run this beyond the backend/frontend
-processes themselves — MySQL, Qdrant, Azure OpenAI, and Cohere are all
+processes themselves — Postgres, Qdrant, Azure OpenAI, and Cohere are all
 managed/cloud services, configured via environment variables.
 
 ## Project structure
@@ -58,7 +58,7 @@ frontend/           # React + Vite + TS app (chat UI + eval/debug dashboard)
    - Azure OpenAI endpoint, API key, and deployment names (chat + embeddings)
    - Qdrant Cloud URL + API key
    - Cohere API key
-   - Railway MySQL `DATABASE_URL`
+   - Railway Postgres `DATABASE_URL`
    - A JWT secret (for v3 auth)
 2. Backend:
    ```
