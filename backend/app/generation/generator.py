@@ -34,7 +34,7 @@ def _client() -> AzureOpenAI:
     )
 
 
-def _format_source_locator(chunk: RetrievedChunk) -> str:
+def format_source_locator(chunk: RetrievedChunk) -> str:
     if chunk.page_start is not None:
         loc = f"page {chunk.page_start}" if chunk.page_start == chunk.page_end else f"pages {chunk.page_start}-{chunk.page_end}"
     elif chunk.line_start is not None:
@@ -50,7 +50,7 @@ def _format_source_locator(chunk: RetrievedChunk) -> str:
 
 def _build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     sources_block = "\n\n".join(
-        f"[{i + 1}] Source: {_format_source_locator(c)}\n{c.text}"
+        f"[{i + 1}] Source: {format_source_locator(c)}\n{c.text}"
         for i, c in enumerate(chunks)
     )
     return f"Sources:\n\n{sources_block}\n\nQuestion: {question}"
@@ -99,7 +99,7 @@ def generate_answer(question: str, chunks: list[RetrievedChunk]) -> GeneratedAns
         Source(
             index=i,
             filename=chunks[i - 1].filename,
-            locator=_format_source_locator(chunks[i - 1]),
+            locator=format_source_locator(chunks[i - 1]),
             text=chunks[i - 1].text,
         )
         for i in cited_indices

@@ -138,7 +138,19 @@ def _to_retrieved_chunk(point) -> RetrievedChunk:
     )
 
 
-def search_dense(query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
+def _doc_filter(allowed_doc_ids: list[str] | None) -> qmodels.Filter | None:
+    if allowed_doc_ids is None:
+        return None
+    return qmodels.Filter(
+        must=[qmodels.FieldCondition(key="doc_id", match=qmodels.MatchAny(any=allowed_doc_ids))]
+    )
+
+
+def search_dense(
+    query_vector: list[float],
+    top_k: int,
+    allowed_doc_ids: list[str] | None = None,
+) -> list[RetrievedChunk]:
     settings = get_settings()
     client = get_client()
 
@@ -147,6 +159,30 @@ def search_dense(query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
         query=query_vector,
         using="dense",
         limit=top_k,
+        query_filter=_doc_filter(allowed_doc_ids),
+        with_payload=True,
+    ).points
+
+    return [_to_retrieved_chunk(point) for point in results]
+
+
+def search_sparse(
+    sparse_vector: qmodels.SparseVector,
+    top_k: int,
+    allowed_doc_ids: list[str] | None = None,
+) -> list[RetrievedChunk]:
+    """BM25-only search (debug-trace use — the real query path uses the
+    fused hybrid search below, which doesn't expose per-method scores).
+    """
+    settings = get_settings()
+    client = get_client()
+
+    results = client.query_points(
+        collection_name=settings.qdrant_collection_name,
+        query=sparse_vector,
+        using="sparse",
+        limit=top_k,
+        query_filter=_doc_filter(allowed_doc_ids),
         with_payload=True,
     ).points
 
@@ -168,12 +204,7 @@ def search_hybrid(
     """
     settings = get_settings()
     client = get_client()
-
-    doc_filter = None
-    if allowed_doc_ids is not None:
-        doc_filter = qmodels.Filter(
-            must=[qmodels.FieldCondition(key="doc_id", match=qmodels.MatchAny(any=allowed_doc_ids))]
-        )
+    doc_filter = _doc_filter(allowed_doc_ids)
 
     results = client.query_points(
         collection_name=settings.qdrant_collection_name,

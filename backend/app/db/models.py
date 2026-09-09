@@ -1,13 +1,13 @@
 """SQLAlchemy models. Chunk content and citation metadata live in Qdrant's
-payload, not here — MySQL only tracks document/user/permission metadata.
-Eval logs (v4a) get their own tables when that version lands.
+payload, not here — MySQL only tracks document/user/permission/eval-log
+metadata.
 """
 
 import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -68,3 +68,48 @@ class DocumentShare(Base):
     document_id: Mapped[str] = mapped_column(String(36), ForeignKey("documents.id"), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class QueryLog(Base):
+    """One row per /query call — the per-query debug trace and the data
+    behind the aggregate eval dashboard. Chunk-level detail (dense/sparse/
+    fused/reranked candidates, cited sources) is stored as JSON rather than
+    normalized tables — it's write-once, read-as-a-blob debug data, not
+    something queried relationally.
+    """
+
+    __tablename__ = "query_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    rewritten_query: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Retrieval debug trace: lists of {chunk_id, doc_id, filename, locator, score}-shaped dicts.
+    retrieved_dense: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    retrieved_sparse: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    fused_candidates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    reranked_chunks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Eval scores — nullable: null when evaluate=false, or when a metric
+    # failed open, or when there was no retrieved context to evaluate.
+    faithfulness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    context_precision_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    answer_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eval_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    eval_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    latency_retrieval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_rerank_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_llm_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_eval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_total_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False, index=True)

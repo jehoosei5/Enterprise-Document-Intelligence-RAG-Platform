@@ -37,6 +37,7 @@ email-validator==2.2.0   # pydantic EmailStr support
 # --- Utilities ---
 tenacity==9.0.0
 python-dotenv==1.0.1
+numpy==2.5.3              # cosine similarity in app/evaluation/metrics.py (already a transitive dep)
 
 # --- Dev / test ---
 pytest==8.3.4

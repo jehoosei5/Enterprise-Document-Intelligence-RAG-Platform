@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     default_top_k: int = 5
     hybrid_fetch_k: int = 20  # candidates fetched from fusion before reranking down to top_k
 
+    # --- Evaluation ---
+    faithfulness_pass_threshold: float = 0.7
+    eval_hypothetical_questions: int = 3  # for answer-relevance scoring
+    debug_display_k: int = 10  # how many pre-rerank dense/sparse candidates to keep in the debug trace
+
     @property
     def upload_path(self) -> Path:
         p = Path(self.upload_dir)

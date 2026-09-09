@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import auth, documents, health, query
+from app.api import auth, documents, health, queries, query
 from app.retrieval.qdrant_store import ensure_collection
 
 
@@ -18,3 +18,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(query.router)
+app.include_router(queries.router)
