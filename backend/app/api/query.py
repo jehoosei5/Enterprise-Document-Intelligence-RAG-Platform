@@ -1,6 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from app.api.deps import get_accessible_doc_ids, get_current_user
 from app.core.config import get_settings
+from app.db.models import User
+from app.db.session import get_db
 from app.embeddings.azure_embeddings import embed_text
 from app.embeddings.sparse_embeddings import embed_text as sparse_embed_text
 from app.generation.generator import generate_answer
@@ -13,15 +17,34 @@ router = APIRouter(tags=["query"])
 
 
 @router.post("/query", response_model=QueryResponse)
-def query(request: QueryRequest) -> QueryResponse:
+def query(
+    request: QueryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> QueryResponse:
     settings = get_settings()
     top_k = request.top_k or settings.default_top_k
+
+    accessible_doc_ids = get_accessible_doc_ids(current_user, db)
+    if not accessible_doc_ids:
+        return QueryResponse(
+            answer="You don't have access to any documents yet.",
+            sources=[],
+            rewritten_query=request.question,
+            input_tokens=0,
+            output_tokens=0,
+        )
 
     rewritten = rewrite_query(request.question)
 
     dense_vector = embed_text(rewritten)
     sparse_vector = sparse_embed_text(rewritten)
-    candidates = search_hybrid(dense_vector, sparse_vector, fetch_k=settings.hybrid_fetch_k)
+    candidates = search_hybrid(
+        dense_vector,
+        sparse_vector,
+        fetch_k=settings.hybrid_fetch_k,
+        allowed_doc_ids=accessible_doc_ids,
+    )
 
     reranked = rerank(rewritten, candidates, top_k=top_k)
 

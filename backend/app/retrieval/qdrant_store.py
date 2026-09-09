@@ -27,7 +27,9 @@ def get_client() -> QdrantClient:
 
 
 def ensure_collection() -> None:
-    """Idempotently create the collection if it doesn't exist yet."""
+    """Idempotently create the collection (and its payload indexes) if it
+    doesn't exist yet.
+    """
     settings = get_settings()
     client = get_client()
 
@@ -52,6 +54,14 @@ def ensure_collection() -> None:
                 modifier=qmodels.Modifier.IDF,
             ),
         },
+    )
+
+    # Required to filter search by doc_id (permission gating in v3) —
+    # Qdrant refuses an unindexed filter field with a 400.
+    client.create_payload_index(
+        collection_name=settings.qdrant_collection_name,
+        field_name="doc_id",
+        field_schema=qmodels.PayloadSchemaType.KEYWORD,
     )
 
 
@@ -147,18 +157,29 @@ def search_hybrid(
     dense_vector: list[float],
     sparse_vector: qmodels.SparseVector,
     fetch_k: int,
+    allowed_doc_ids: list[str] | None = None,
 ) -> list[RetrievedChunk]:
     """Dense + sparse (BM25) search fused server-side via Reciprocal Rank
     Fusion, in one Qdrant Query API call.
+
+    When allowed_doc_ids is given, both sub-queries are filtered to only
+    those documents — permission enforcement happens inside retrieval
+    itself, not by discarding results after the fact.
     """
     settings = get_settings()
     client = get_client()
 
+    doc_filter = None
+    if allowed_doc_ids is not None:
+        doc_filter = qmodels.Filter(
+            must=[qmodels.FieldCondition(key="doc_id", match=qmodels.MatchAny(any=allowed_doc_ids))]
+        )
+
     results = client.query_points(
         collection_name=settings.qdrant_collection_name,
         prefetch=[
-            qmodels.Prefetch(query=dense_vector, using="dense", limit=fetch_k),
-            qmodels.Prefetch(query=sparse_vector, using="sparse", limit=fetch_k),
+            qmodels.Prefetch(query=dense_vector, using="dense", limit=fetch_k, filter=doc_filter),
+            qmodels.Prefetch(query=sparse_vector, using="sparse", limit=fetch_k, filter=doc_filter),
         ],
         query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
         limit=fetch_k,

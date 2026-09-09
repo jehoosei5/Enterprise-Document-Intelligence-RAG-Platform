@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from app.db.models import DocumentStatus, SourceFormat
 
@@ -21,3 +21,7 @@ class DocumentOut(BaseModel):
 
 class DocumentUploadResponse(DocumentOut):
     pass
+
+
+class ShareRequest(BaseModel):
+    email: EmailStr
