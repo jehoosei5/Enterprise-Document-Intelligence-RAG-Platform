@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     eval_hypothetical_questions: int = 3  # for answer-relevance scoring
     debug_display_k: int = 10  # how many pre-rerank dense/sparse candidates to keep in the debug trace
 
+    # --- Conversation memory ---
+    conversation_history_turns: int = 6  # prior Q&A turns fed into query rewriting for follow-up resolution
+
     @property
     def upload_path(self) -> Path:
         p = Path(self.upload_dir)

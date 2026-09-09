@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -11,6 +12,7 @@ class QueryLogSummary(BaseModel):
     context_precision_score: float | None
     answer_relevance_score: float | None
     eval_passed: bool | None
+    feedback: str | None
     latency_total_ms: int
     created_at: datetime
 
@@ -38,6 +40,7 @@ class QueryLogDetail(BaseModel):
     answer_relevance_score: float | None
     eval_passed: bool | None
     eval_detail: dict | None
+    feedback: str | None
 
     latency_retrieval_ms: int
     latency_rerank_ms: int
@@ -57,8 +60,13 @@ class StatsBucket(BaseModel):
     avg_context_precision: float | None
     avg_answer_relevance: float | None
     pass_rate: float | None
+    thumbs_up_rate: float | None
     avg_latency_total_ms: float
 
 
 class StatsResponse(BaseModel):
     buckets: list[StatsBucket]
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]

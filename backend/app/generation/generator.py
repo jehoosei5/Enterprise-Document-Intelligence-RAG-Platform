@@ -1,10 +1,12 @@
 """Builds a grounded prompt from retrieved chunks, calls Azure OpenAI chat
-completion, and maps the model's inline [n] citations back to source chunks.
+completion (streaming or not), and maps the model's inline [n] citations
+back to source chunks.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Generator
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -72,6 +74,23 @@ class GeneratedAnswer:
     output_tokens: int
 
 
+def parse_citations(answer_text: str, chunks: list[RetrievedChunk]) -> list[Source]:
+    """Maps the model's inline [n] citations back to the source chunks
+    they refer to. Shared by both the sync and streaming generation paths.
+    """
+    cited_indices = sorted({int(n) for n in _CITATION_RE.findall(answer_text)})
+    return [
+        Source(
+            index=i,
+            filename=chunks[i - 1].filename,
+            locator=format_source_locator(chunks[i - 1]),
+            text=chunks[i - 1].text,
+        )
+        for i in cited_indices
+        if 1 <= i <= len(chunks)
+    ]
+
+
 def generate_answer(question: str, chunks: list[RetrievedChunk]) -> GeneratedAnswer:
     settings = get_settings()
 
@@ -93,18 +112,7 @@ def generate_answer(question: str, chunks: list[RetrievedChunk]) -> GeneratedAns
     )
 
     answer_text = response.choices[0].message.content or ""
-    cited_indices = sorted({int(n) for n in _CITATION_RE.findall(answer_text)})
-
-    sources = [
-        Source(
-            index=i,
-            filename=chunks[i - 1].filename,
-            locator=format_source_locator(chunks[i - 1]),
-            text=chunks[i - 1].text,
-        )
-        for i in cited_indices
-        if 1 <= i <= len(chunks)
-    ]
+    sources = parse_citations(answer_text, chunks)
 
     usage = response.usage
     return GeneratedAnswer(
@@ -113,3 +121,45 @@ def generate_answer(question: str, chunks: list[RetrievedChunk]) -> GeneratedAns
         input_tokens=usage.prompt_tokens if usage else 0,
         output_tokens=usage.completion_tokens if usage else 0,
     )
+
+
+@dataclass
+class StreamUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+def stream_answer(
+    question: str, chunks: list[RetrievedChunk], usage_out: StreamUsage
+) -> Generator[str, None, None]:
+    """Yields answer text deltas as they arrive from Azure OpenAI. The
+    caller accumulates them into the full answer text (for citation
+    parsing + eval, which need the complete text). usage_out is mutated
+    in place with token counts once the final chunk (which carries usage,
+    via stream_options) arrives — Python generators can't cleanly both
+    yield values and return a final value, so this is the simplest way to
+    hand token usage back to the caller after the stream completes.
+    """
+    settings = get_settings()
+
+    if not chunks:
+        yield "I couldn't find any relevant information in the uploaded documents."
+        return
+
+    prompt = _build_prompt(question, chunks)
+    stream = _client().chat.completions.create(
+        model=settings.azure_openai_chat_deployment,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+
+    for chunk in stream:
+        if chunk.usage is not None:
+            usage_out.input_tokens = chunk.usage.prompt_tokens
+            usage_out.output_tokens = chunk.usage.completion_tokens
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content

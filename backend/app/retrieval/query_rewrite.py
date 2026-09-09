@@ -1,6 +1,7 @@
-"""Single-turn query rewriting: clean up the raw user question into a
-better search query before embedding it. Not conversation-aware — resolving
-multi-turn follow-ups is v4b's job (conversation memory), not this.
+"""Query rewriting: clean up the raw user question into a better search
+query before embedding it. When prior conversation turns are given, also
+resolves follow-ups (pronouns/ellipsis) against them — e.g. "what about for
+managers?" -> "How many PTO days do managers get?".
 """
 
 from __future__ import annotations
@@ -22,6 +23,17 @@ _SYSTEM_PROMPT = (
     "is being asked. Reply with ONLY the rewritten query, no explanation."
 )
 
+_SYSTEM_PROMPT_WITH_HISTORY = (
+    "Rewrite the user's latest question into a clear, standalone search "
+    "query for a document retrieval system, using the conversation history "
+    "to resolve any pronouns, ellipsis, or implicit references (e.g. "
+    '"what about for managers?" after a question about PTO days becomes '
+    '"How many PTO days do managers get?"). Fix typos and expand '
+    "abbreviations/acronyms too. Preserve the question's intent exactly — "
+    "do not answer it, add information, or change what is being asked. "
+    "Reply with ONLY the rewritten standalone query, no explanation."
+)
+
 
 @lru_cache
 def _client() -> AzureOpenAI:
@@ -33,17 +45,30 @@ def _client() -> AzureOpenAI:
     )
 
 
-def rewrite_query(question: str) -> str:
+def rewrite_query(question: str, history: list[dict] | None = None) -> str:
     """Returns the rewritten query, or the original question unchanged if
     the rewrite call fails for any reason (fail open, not closed).
+
+    history, if given, is a list of {"question": ..., "answer": ...} prior
+    turns (oldest first), already capped by the caller to the last N turns.
     """
     settings = get_settings()
     try:
+        if history:
+            history_block = "\n\n".join(
+                f"Q: {turn['question']}\nA: {turn['answer']}" for turn in history
+            )
+            user_prompt = f"Conversation history:\n\n{history_block}\n\nLatest question: {question}"
+            system_prompt = _SYSTEM_PROMPT_WITH_HISTORY
+        else:
+            user_prompt = question
+            system_prompt = _SYSTEM_PROMPT
+
         response = _client().chat.completions.create(
             model=settings.azure_openai_chat_deployment,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": question},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=0,
         )

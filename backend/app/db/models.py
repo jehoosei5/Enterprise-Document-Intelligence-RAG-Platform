@@ -70,6 +70,20 @@ class DocumentShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
 
+class Conversation(Base):
+    """Every query belongs to one of these, even a standalone one-off
+    question (a conversation of length 1) — simpler than special-casing
+    "no conversation" throughout the query pipeline and history endpoints.
+    """
+
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)  # first question, truncated
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
 class QueryLog(Base):
     """One row per /query call — the per-query debug trace and the data
     behind the aggregate eval dashboard. Chunk-level detail (dense/sparse/
@@ -82,6 +96,9 @@ class QueryLog(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("conversations.id"), nullable=False, index=True
+    )
 
     question: Mapped[str] = mapped_column(Text, nullable=False)
     rewritten_query: Mapped[str] = mapped_column(Text, nullable=False)
@@ -105,6 +122,8 @@ class QueryLog(Base):
     answer_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     eval_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     eval_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    feedback: Mapped[str | None] = mapped_column(String(8), nullable=True)  # "up" | "down"
 
     latency_retrieval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     latency_rerank_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

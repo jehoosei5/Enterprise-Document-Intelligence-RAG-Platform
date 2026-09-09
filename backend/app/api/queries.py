@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.models import QueryLog, User
 from app.db.session import get_db
-from app.schemas.queries import QueryLogDetail, QueryLogSummary, StatsBucket, StatsResponse
+from app.schemas.queries import FeedbackRequest, QueryLogDetail, QueryLogSummary, StatsBucket, StatsResponse
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
@@ -46,6 +46,9 @@ def query_stats(
             func.avg(QueryLog.context_precision_score).label("avg_context_precision"),
             func.avg(QueryLog.answer_relevance_score).label("avg_answer_relevance"),
             func.avg(QueryLog.eval_passed).label("pass_rate"),  # MySQL treats tinyint(1) as numeric
+            func.avg(
+                case((QueryLog.feedback == "up", 1), (QueryLog.feedback == "down", 0), else_=None)
+            ).label("thumbs_up_rate"),
             func.avg(QueryLog.latency_total_ms).label("avg_latency_total_ms"),
         )
         .filter(QueryLog.user_id == current_user.id, QueryLog.created_at >= since)
@@ -62,6 +65,7 @@ def query_stats(
             avg_context_precision=r.avg_context_precision,
             avg_answer_relevance=r.avg_answer_relevance,
             pass_rate=r.pass_rate,
+            thumbs_up_rate=r.thumbs_up_rate,
             avg_latency_total_ms=r.avg_latency_total_ms or 0,
         )
         for r in rows
@@ -79,3 +83,18 @@ def get_query(
     if log is None or log.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Query not found")
     return log
+
+
+@router.post("/{query_id}/feedback", status_code=204)
+def submit_feedback(
+    query_id: str,
+    request: FeedbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    log = db.get(QueryLog, query_id)
+    if log is None or log.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Query not found")
+
+    log.feedback = request.rating  # overwrites any prior rating
+    db.commit()
