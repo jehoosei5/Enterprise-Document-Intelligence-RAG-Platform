@@ -18,9 +18,9 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
        → evaluate → log/serve
 ```
 
-**Status: v1 (core pipeline), v2 (retrieval quality), and v3 (access
-control) are built and verified.** v4a–v4b are not started yet — see
-[Build plan](#build-plan).
+**Status: v1 (core pipeline), v2 (retrieval quality), v3 (access control),
+and v4a (evaluation — the differentiator) are built and verified.** v4b is
+not started yet — see [Build plan](#build-plan).
 
 ## Tech stack
 
@@ -45,7 +45,7 @@ backend/
     core/
       config.py            # pydantic-settings, reads backend/.env
       security.py            # bcrypt password hashing + JWT (raw bcrypt — passlib is broken, see below)
-    db/                   # SQLAlchemy models (User, Document, DocumentShare) + session
+    db/                   # SQLAlchemy models (User, Document, DocumentShare, QueryLog) + session
     ingestion/             # format-specific parsers -> common IR (common.py)
       pdf.py                 # PyMuPDF + pytesseract OCR fallback for scans
       docx_parser.py          # python-docx, heading-aware
@@ -57,14 +57,15 @@ backend/
       azure_embeddings.py     # Azure OpenAI dense embeddings, auto-detects dimension
       sparse_embeddings.py     # local BM25 sparse vectors via fastembed (Qdrant/bm25)
     retrieval/
-      qdrant_store.py          # collection mgmt (dense+sparse), upsert, dense + RRF hybrid search
+      qdrant_store.py          # collection mgmt (dense+sparse), dense/sparse/RRF-hybrid search
       query_rewrite.py          # single-turn query rewrite (Azure OpenAI)
       reranker.py                # Cohere cross-encoder rerank, fails open to fused order
     generation/generator.py    # Azure OpenAI chat + [n]-citation mapping
+    evaluation/metrics.py      # hand-rolled RAGAS-style faithfulness/context-precision/answer-relevance
     api/
       auth.py                  # register/login/me
       deps.py                   # get_current_user, get_accessible_doc_ids (owned ∪ shared)
-      documents.py, query.py, health.py
+      documents.py, query.py, queries.py (eval history + dashboard), health.py
     schemas/                # Pydantic request/response models
     main.py                 # FastAPI app + router wiring
   alembic/                # DB migrations
@@ -96,7 +97,7 @@ frontend/                 # not started yet (v1 is backend/API-only)
    python -m venv venv
    venv\Scripts\activate          # Windows
    pip install -r requirements.txt
-   alembic upgrade head            # creates users, documents, document_shares tables
+   alembic upgrade head            # creates users, documents, document_shares, query_logs tables
    venv\Scripts\uvicorn.exe app.main:app --reload
    ```
    > If a bare `uvicorn` command picks up a different Python (e.g. Anaconda)
@@ -126,7 +127,10 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require
 | `GET /documents` | List documents the caller owns or has been shared |
 | `GET /documents/{id}` | Get one document's status (404 if inaccessible) |
 | `POST /documents/{id}/share` | `{"email": "..."}` — owner-only, grants that user read access |
-| `POST /query` | `{"question": "...", "top_k": 5}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF, filtered to the caller's accessible documents), reranked (Cohere), then answered with `[n]` citations. Response includes `rewritten_query` alongside `answer`/`sources` |
+| `POST /query` | `{"question": "...", "top_k": 5, "evaluate": true}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF, filtered to the caller's accessible documents), reranked (Cohere), answered with `[n]` citations, then scored (faithfulness/context precision/answer relevance) and logged. Response includes `query_id`, `rewritten_query`, `answer`, `sources` |
+| `GET /queries` | Paginated list of the caller's own past queries (summary + eval scores) |
+| `GET /queries/{id}` | Full per-query debug trace: dense/sparse/fused/reranked candidates with scores, sources, tokens, eval scores + detail (claims, verdicts, hypothetical questions), latency breakdown. 404 if not the caller's own |
+| `GET /queries/stats?days=30` | Daily aggregates for the caller: query count, avg scores, pass rate, avg latency — the eval dashboard's data source |
 
 ## Build plan
 
@@ -184,20 +188,45 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require
   to filter by it (`ensure_collection()` now creates one) — filtering
   without it is a 400, not silently ignored
 
-**v4a — Evaluation (the differentiator — don't skip or rush this)**
-- Faithfulness/hallucination scoring, context precision, answer relevance
-  (RAGAS-style), logged per query
-- Aggregate eval dashboard (trends over time)
-- Per-query debug view, toggleable:
-  - User query + rewritten query (diffed)
-  - Retrieval: vector + BM25 result counts, top chunks with
-    similarity/BM25 scores pre-rerank
-  - Reranking: which chunks survived, with cross-encoder/Cohere scores
-  - Sources: document + page/section per cited chunk
-  - Generation: model, input/output tokens, estimated cost
-  - Evaluation: faithfulness/context precision/answer relevance, with a
-    pass/fail threshold flag (e.g. faithfulness < 0.7 → flagged)
-  - Latency breakdown: retrieval, reranking, LLM, total
+**v4a — Evaluation (the differentiator) ✅ done**
+- Hand-rolled RAGAS-style metrics against Azure OpenAI directly (not the
+  `ragas` package — it pulls in LangChain, contradicting this project's
+  no-LangChain/full-debug-visibility stance):
+  - **Faithfulness**: claim-extraction call + per-claim verdict-against-
+    context call. Score = supported/total claims
+  - **Context precision**: per-context relevance verdicts against the
+    question, rank-weighted (mean of precision@k over relevant positions —
+    rewards relevant chunks ranked earlier, not just present)
+  - **Answer relevance**: generates hypothetical questions the answer
+    would address, scores mean cosine similarity to the actual question
+  - All three computed against the chunks actually used for generation
+    (post-rerank); each fails open independently (`None` on error, logged)
+    rather than 500ing `/query`
+- `evaluate: bool` on `/query` (default `true`) to skip eval when not
+  needed (saves ~3 LLM calls of latency/cost)
+- Per-query debug trace (`GET /queries/{id}`), fetched on demand rather
+  than inlined in every response:
+  - Rewritten query, dense-only + sparse-only + fused pre-rerank
+    candidates (with their native similarity/BM25/RRF scores — not just
+    the fused score, which alone can't show what each retrieval method
+    contributed), reranked chunks (visibly reordered vs. the fused order),
+    cited sources, tokens, eval scores + full detail (claims, verdicts,
+    hypothetical questions), and a 5-way latency breakdown (retrieval,
+    rerank, LLM, eval, total)
+- Aggregate dashboard (`GET /queries/stats`) — daily avg scores, pass
+  rate, avg latency, scoped to the caller (no admin role exists, so eval
+  history stays permission-scoped like documents)
+- Dollar cost estimation explicitly deferred (no live Azure pricing
+  available) — token counts are tracked, not converted to $
+- Verified end-to-end: a well-grounded answer scored faithfulness 1.0 /
+  context precision 0.83; a deliberately fabricated claim was caught
+  (faithfulness dropped to 0.33, correctly flagging the 2 unsupported
+  claims); an unanswerable question showed the metrics' real value —
+  faithfulness stayed 1.0 (the model honestly declined rather than
+  hallucinating) while context precision correctly dropped to 0.0
+  (nothing retrieved was actually relevant); reranking visibly reordered
+  the fused candidates; cross-user access to another user's query log
+  returned 404
 
 **v4b — Polish (cut first if time runs short)**
 - Conversation memory (multi-turn, follow-up resolution)
