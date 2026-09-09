@@ -18,8 +18,9 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
        → evaluate → log/serve
 ```
 
-**Status: v1 (core pipeline) and v2 (retrieval quality) are built and
-verified.** v3–v4b are not started yet — see [Build plan](#build-plan).
+**Status: v1 (core pipeline), v2 (retrieval quality), and v3 (access
+control) are built and verified.** v4a–v4b are not started yet — see
+[Build plan](#build-plan).
 
 ## Tech stack
 
@@ -41,8 +42,10 @@ environment variables.
 ```
 backend/
   app/
-    core/config.py       # pydantic-settings, reads backend/.env
-    db/                   # SQLAlchemy models (Document) + session
+    core/
+      config.py            # pydantic-settings, reads backend/.env
+      security.py            # bcrypt password hashing + JWT (raw bcrypt — passlib is broken, see below)
+    db/                   # SQLAlchemy models (User, Document, DocumentShare) + session
     ingestion/             # format-specific parsers -> common IR (common.py)
       pdf.py                 # PyMuPDF + pytesseract OCR fallback for scans
       docx_parser.py          # python-docx, heading-aware
@@ -58,7 +61,10 @@ backend/
       query_rewrite.py          # single-turn query rewrite (Azure OpenAI)
       reranker.py                # Cohere cross-encoder rerank, fails open to fused order
     generation/generator.py    # Azure OpenAI chat + [n]-citation mapping
-    api/                    # documents.py, query.py, health.py
+    api/
+      auth.py                  # register/login/me
+      deps.py                   # get_current_user, get_accessible_doc_ids (owned ∪ shared)
+      documents.py, query.py, health.py
     schemas/                # Pydantic request/response models
     main.py                 # FastAPI app + router wiring
   alembic/                # DB migrations
@@ -81,7 +87,8 @@ frontend/                 # not started yet (v1 is backend/API-only)
      service's own env vars should reference the MySQL plugin's internal
      URL instead (`mysql.railway.internal` only resolves inside Railway's
      private network, not from your machine)
-   - A JWT secret (reserved for v3)
+   - A JWT secret (used to sign access tokens — set this to a real random
+     string, not the placeholder)
 
 2. **Backend**:
    ```
@@ -89,7 +96,7 @@ frontend/                 # not started yet (v1 is backend/API-only)
    python -m venv venv
    venv\Scripts\activate          # Windows
    pip install -r requirements.txt
-   alembic upgrade head            # creates the documents table
+   alembic upgrade head            # creates users, documents, document_shares tables
    venv\Scripts\uvicorn.exe app.main:app --reload
    ```
    > If a bare `uvicorn` command picks up a different Python (e.g. Anaconda)
@@ -106,13 +113,20 @@ frontend/                 # not started yet (v1 is backend/API-only)
 
 ### API
 
+All endpoints except `/health`, `/auth/register`, and `/auth/login` require
+`Authorization: Bearer <token>` (obtained from `/auth/login`).
+
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | DB + Qdrant connectivity check |
-| `POST /documents` | Upload a file (`multipart/form-data`, field `file`) — parses, chunks, embeds (dense + sparse), indexes, and returns the document record |
-| `GET /documents` | List uploaded documents |
-| `GET /documents/{id}` | Get one document's status |
-| `POST /query` | `{"question": "...", "top_k": 5}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF), reranked (Cohere), then answered with `[n]` citations. Response includes `rewritten_query` alongside `answer`/`sources` |
+| `GET /health` | DB + Qdrant connectivity check (no auth) |
+| `POST /auth/register` | `{"email": ..., "password": ...}` → create a user (no auth) |
+| `POST /auth/login` | `{"email": ..., "password": ...}` → `{"access_token": ..., "token_type": "bearer"}` (no auth) |
+| `GET /auth/me` | Current user's profile |
+| `POST /documents` | Upload a file (`multipart/form-data`, field `file`) — parses, chunks, embeds (dense + sparse), indexes, and returns the document record. Caller becomes the owner |
+| `GET /documents` | List documents the caller owns or has been shared |
+| `GET /documents/{id}` | Get one document's status (404 if inaccessible) |
+| `POST /documents/{id}/share` | `{"email": "..."}` — owner-only, grants that user read access |
+| `POST /query` | `{"question": "...", "top_k": 5}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF, filtered to the caller's accessible documents), reranked (Cohere), then answered with `[n]` citations. Response includes `rewritten_query` alongside `answer`/`sources` |
 
 ## Build plan
 
@@ -149,9 +163,26 @@ frontend/                 # not started yet (v1 is backend/API-only)
   keyword-heavy queries both retrieve correctly via `/query`, and a bad
   Cohere key confirmed to degrade gracefully instead of erroring
 
-**v3 — Access control**
-- Authentication
-- Document-level permissions gating retrieval
+**v3 — Access control ✅ done**
+- Authentication: JWT bearer tokens (`pyjwt`), password hashing via raw
+  `bcrypt` (**`passlib[bcrypt]` was dropped** — verified incompatible with
+  the installed `bcrypt>=4.1`, crashes on `hash()`)
+- Permission model: `documents.owner_id` (uploader) + a `document_shares`
+  table (explicit per-user read grants) — no roles/admin tier
+- Enforced at retrieval time, not just listing: the caller's accessible
+  `doc_id`s are computed from MySQL and passed as a Qdrant filter into
+  *both* hybrid sub-queries, so inaccessible chunks are never retrieved in
+  the first place, not merely hidden after the fact
+- `GET /documents/{id}` and `POST /documents/{id}/share` on an inaccessible
+  document both return 404 (never 403), so a caller can't learn a document
+  exists just by trying
+- Verified end-to-end: two real users, cross-user isolation on both
+  `GET /documents` and `POST /query`, sharing grants access, non-owner
+  share attempts rejected, all protected routes 401 without a token,
+  `/health` still open
+- Caught along the way: Qdrant needs an explicit payload index on `doc_id`
+  to filter by it (`ensure_collection()` now creates one) — filtering
+  without it is a 400, not silently ignored
 
 **v4a — Evaluation (the differentiator — don't skip or rush this)**
 - Faithfulness/hallucination scoring, context precision, answer relevance
