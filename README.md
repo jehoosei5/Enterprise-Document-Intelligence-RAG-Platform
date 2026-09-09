@@ -18,9 +18,8 @@ Upload → parse (format-specific) → chunk → embed + index (vector + keyword
        → evaluate → log/serve
 ```
 
-**Status: v1 (core pipeline), v2 (retrieval quality), v3 (access control),
-and v4a (evaluation — the differentiator) are built and verified.** v4b is
-not started yet — see [Build plan](#build-plan).
+**Status: v1–v4b are all built and verified — the full brief is complete.**
+See [Build plan](#build-plan).
 
 ## Tech stack
 
@@ -45,7 +44,7 @@ backend/
     core/
       config.py            # pydantic-settings, reads backend/.env
       security.py            # bcrypt password hashing + JWT (raw bcrypt — passlib is broken, see below)
-    db/                   # SQLAlchemy models (User, Document, DocumentShare, QueryLog) + session
+    db/                   # SQLAlchemy models (User, Document, DocumentShare, Conversation, QueryLog) + session
     ingestion/             # format-specific parsers -> common IR (common.py)
       pdf.py                 # PyMuPDF + pytesseract OCR fallback for scans
       docx_parser.py          # python-docx, heading-aware
@@ -58,14 +57,15 @@ backend/
       sparse_embeddings.py     # local BM25 sparse vectors via fastembed (Qdrant/bm25)
     retrieval/
       qdrant_store.py          # collection mgmt (dense+sparse), dense/sparse/RRF-hybrid search
-      query_rewrite.py          # single-turn query rewrite (Azure OpenAI)
+      query_rewrite.py          # query rewrite (Azure OpenAI), conversation-history-aware follow-up resolution
       reranker.py                # Cohere cross-encoder rerank, fails open to fused order
-    generation/generator.py    # Azure OpenAI chat + [n]-citation mapping
+    generation/generator.py    # Azure OpenAI chat (sync + streaming) + [n]-citation mapping
     evaluation/metrics.py      # hand-rolled RAGAS-style faithfulness/context-precision/answer-relevance
     api/
       auth.py                  # register/login/me
       deps.py                   # get_current_user, get_accessible_doc_ids (owned ∪ shared)
-      documents.py, query.py, queries.py (eval history + dashboard), health.py
+      documents.py, query.py (sync + SSE streaming), queries.py (eval history/feedback/dashboard),
+      conversations.py, health.py
     schemas/                # Pydantic request/response models
     main.py                 # FastAPI app + router wiring
   alembic/                # DB migrations
@@ -97,7 +97,7 @@ frontend/                 # not started yet (v1 is backend/API-only)
    python -m venv venv
    venv\Scripts\activate          # Windows
    pip install -r requirements.txt
-   alembic upgrade head            # creates users, documents, document_shares, query_logs tables
+   alembic upgrade head            # creates users, documents, document_shares, conversations, query_logs tables
    venv\Scripts\uvicorn.exe app.main:app --reload
    ```
    > If a bare `uvicorn` command picks up a different Python (e.g. Anaconda)
@@ -127,10 +127,14 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require
 | `GET /documents` | List documents the caller owns or has been shared |
 | `GET /documents/{id}` | Get one document's status (404 if inaccessible) |
 | `POST /documents/{id}/share` | `{"email": "..."}` — owner-only, grants that user read access |
-| `POST /query` | `{"question": "...", "top_k": 5, "evaluate": true}` → query is rewritten, hybrid-retrieved (dense+BM25, fused via Qdrant RRF, filtered to the caller's accessible documents), reranked (Cohere), answered with `[n]` citations, then scored (faithfulness/context precision/answer relevance) and logged. Response includes `query_id`, `rewritten_query`, `answer`, `sources` |
-| `GET /queries` | Paginated list of the caller's own past queries (summary + eval scores) |
-| `GET /queries/{id}` | Full per-query debug trace: dense/sparse/fused/reranked candidates with scores, sources, tokens, eval scores + detail (claims, verdicts, hypothetical questions), latency breakdown. 404 if not the caller's own |
-| `GET /queries/stats?days=30` | Daily aggregates for the caller: query count, avg scores, pass rate, avg latency — the eval dashboard's data source |
+| `POST /query` | `{"question": "...", "top_k": 5, "evaluate": true, "conversation_id": null}` → query is rewritten (follow-up-aware if `conversation_id` has prior turns), hybrid-retrieved (dense+BM25, fused via Qdrant RRF, filtered to the caller's accessible documents), reranked (Cohere), answered with `[n]` citations, then scored and logged. Response includes `query_id`, `conversation_id` (created if omitted), `rewritten_query`, `answer`, `sources` |
+| `POST /query/stream` | Same request/behavior as `/query`, but the answer streams as Server-Sent Events (`data: {"delta": "..."}`) as it's generated, ending with one `data: {"event": "done", ...}` carrying the same structured metadata (`query_id`, `sources`, tokens, eval scores) |
+| `GET /queries` | Paginated list of the caller's own past queries (summary + eval scores + feedback) |
+| `GET /queries/{id}` | Full per-query debug trace: dense/sparse/fused/reranked candidates with scores, sources, tokens, eval scores + detail (claims, verdicts, hypothetical questions), feedback, latency breakdown. 404 if not the caller's own |
+| `POST /queries/{id}/feedback` | `{"rating": "up"|"down"}` — owner-only, overwrites any prior rating |
+| `GET /queries/stats?days=30` | Daily aggregates for the caller: query count, avg eval scores, pass rate, thumbs-up rate, avg latency — the eval dashboard's data source |
+| `GET /conversations` | Paginated list of the caller's own conversations (title, message count) |
+| `GET /conversations/{id}` | Full ordered turn history (question/answer/query_id per turn) for one conversation. 404 if not the caller's own |
 
 ## Build plan
 
@@ -228,8 +232,28 @@ All endpoints except `/health`, `/auth/register`, and `/auth/login` require
   the fused candidates; cross-user access to another user's query log
   returned 404
 
-**v4b — Polish (cut first if time runs short)**
-- Conversation memory (multi-turn, follow-up resolution)
-- Streaming responses
-- Cost/latency tracking surfaced in the main UI (not just debug view)
-- User feedback (thumbs up/down) feeding back into eval data
+**v4b — Polish ✅ done**
+- **Conversation memory**: every query belongs to a `Conversation` (even a
+  standalone one gets one, of length 1 — no special-casing). Follow-up
+  resolution is one extra bit of context on the existing query-rewrite call
+  (`rewrite_query(question, history=...)`, capped to the last
+  `conversation_history_turns` turns), not a separate pipeline stage.
+  "Cost/latency surfaced in the main UI" was dropped — no frontend exists
+  to surface it in
+- **Streaming**: `POST /query/stream` (SSE) — retrieval/rerank happen up
+  front as usual, only generation streams token-by-token (`stream=True`,
+  `stream_options={"include_usage": True}` for token counts from the final
+  chunk). Citation parsing, eval, and persistence still run after the
+  stream completes, ending in one final structured SSE event — a real UX
+  tradeoff (eval latency lands as a pause *after* the visible text, not
+  hidden by streaming it away)
+- **Feedback**: `POST /queries/{id}/feedback` (`"up"`/`"down"`, overwritable),
+  surfaced as a daily `thumbs_up_rate` in `GET /queries/stats` alongside
+  the eval-score trends
+- Verified end-to-end: a follow-up question ("how do I request it" after
+  asking about PTO days) correctly resolved via conversation history and
+  retrieved the right chunk; `/query/stream` delivered real incremental
+  tokens ending in a metadata event with populated eval scores, and its
+  `QueryLog` persisted identically to the non-streaming path; feedback
+  overwrite and its dashboard aggregation both confirmed; cross-user access
+  to another user's conversation or query feedback returned 404
