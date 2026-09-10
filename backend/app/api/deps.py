@@ -31,7 +31,10 @@ def get_current_user(
 
 
 def get_accessible_doc_ids(user: User, db: Session) -> list[str]:
-    """Documents the user owns, unioned with documents shared with them."""
+    """Documents the user owns, unioned with documents shared with them and
+    documents marked visible to everyone at the company.
+    """
     owned = db.scalars(select(Document.id).where(Document.owner_id == user.id)).all()
     shared = db.scalars(select(DocumentShare.document_id).where(DocumentShare.user_id == user.id)).all()
-    return list({*owned, *shared})
+    public = db.scalars(select(Document.id).where(Document.is_public.is_(True))).all()
+    return list({*owned, *shared, *public})

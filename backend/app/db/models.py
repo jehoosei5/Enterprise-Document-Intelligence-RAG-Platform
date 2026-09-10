@@ -52,6 +52,11 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)  # user-editable, defaults to filename
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # No team/org model exists in this system — just two real states: a
+    # private draft, or visible to everyone at the company.
+    is_public: Mapped[bool] = mapped_column(default=False, nullable=False)
     source_format: Mapped[SourceFormat] = mapped_column(Enum(SourceFormat), nullable=False)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ocr_used: Mapped[bool] = mapped_column(default=False, nullable=False)

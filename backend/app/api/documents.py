@@ -2,7 +2,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_accessible_doc_ids, get_current_user
@@ -22,6 +22,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 @router.post("", response_model=DocumentUploadResponse)
 def upload_document(
     file: UploadFile,
+    title: str = Form(...),
+    category: str | None = Form(None),
+    is_public: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Document:
@@ -42,6 +45,9 @@ def upload_document(
         id=doc_id,
         owner_id=current_user.id,
         filename=file.filename or dest_path.name,
+        title=title.strip() or (file.filename or dest_path.name),
+        category=category,
+        is_public=is_public,
         source_format=_source_format_for_ext(ext),
         status=DocumentStatus.PROCESSING,
     )
@@ -80,18 +86,17 @@ def upload_document(
 
 @router.get("", response_model=list[DocumentOut])
 def list_documents(
+    category: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[Document]:
     accessible_ids = get_accessible_doc_ids(current_user, db)
     if not accessible_ids:
         return []
-    return (
-        db.query(Document)
-        .filter(Document.id.in_(accessible_ids))
-        .order_by(Document.created_at.desc())
-        .all()
-    )
+    query = db.query(Document).filter(Document.id.in_(accessible_ids))
+    if category:
+        query = query.filter(Document.category == category)
+    return query.order_by(Document.created_at.desc()).all()
 
 
 @router.get("/{document_id}", response_model=DocumentOut)
