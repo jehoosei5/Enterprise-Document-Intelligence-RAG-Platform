@@ -19,7 +19,10 @@ app = FastAPI(title="Enterprise Document Intelligence & RAG Platform", lifespan=
 # Browser fetch() calls from the frontend's origin need CORS headers, or
 # they fail in-browser even though curl/server-to-server calls work fine
 # (curl doesn't enforce CORS). frontend_base_url already exists for
-# building password-reset links; reused here as the allowed origin.
+# building password-reset links; reused here as the allowed origin —
+# matches the Vite dev server's fixed port (see frontend/vite.config.ts)
+# and what's authorized for the Google OAuth Client ID in Google Cloud
+# Console.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[get_settings().frontend_base_url],

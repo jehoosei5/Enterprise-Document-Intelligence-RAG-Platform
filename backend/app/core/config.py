@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # --- Password reset (Resend) ---
     resend_api_key: str = ""
     resend_from_email: str = "DocIntel <onboarding@resend.dev>"
-    frontend_base_url: str = "http://localhost:5173"
+    frontend_base_url: str = "http://localhost:5174"
     password_reset_expire_minutes: int = 30
 
     # --- App ---
