@@ -1,5 +1,9 @@
-import { Eye, EyeOff, FileText } from 'lucide-react'
-import { useState } from 'react'
+import { Eye, EyeOff, FileText, LogOut } from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+import { ApiError } from '../lib/api'
+import { clearToken, fetchCurrentUser, getToken, googleSignIn, login, saveToken, type UserOut } from '../lib/auth'
+import { promptGoogleSignIn } from '../lib/googleIdentity'
 
 function GoogleIcon() {
   return (
@@ -30,13 +34,51 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [rememberDevice, setRememberDevice] = useState(false)
 
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [user, setUser] = useState<UserOut | null>(null)
+
+  // Restore session on load if a token is already stored.
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return
+    fetchCurrentUser(token)
+      .then(setUser)
+      .catch(() => clearToken())
+  }, [])
+
+  async function completeSignIn(signIn: () => Promise<{ access_token: string }>) {
+    setError(null)
+    setLoading(true)
+    try {
+      const { access_token } = await signIn()
+      saveToken(access_token)
+      const me = await fetchCurrentUser(access_token)
+      setUser(me)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function handleGoogleSignIn() {
-    // TODO: wire up once auth is implemented
+    completeSignIn(async () => {
+      const idToken = await promptGoogleSignIn()
+      return googleSignIn(idToken)
+    })
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO: wire up once auth is implemented
+    completeSignIn(() => login(email, password))
+  }
+
+  function handleLogout() {
+    clearToken()
+    setUser(null)
+    setEmail('')
+    setPassword('')
   }
 
   return (
@@ -55,91 +97,114 @@ export default function LoginPage() {
         </div>
 
         <div className="rounded-2xl bg-white p-10 shadow-sm">
-          <h1 className="text-center text-3xl font-bold text-slate-900">Welcome back</h1>
-          <p className="mt-2 text-center text-sm text-slate-500">
-            Sign in to access your company documents and guides
-          </p>
-
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            className="mt-7 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
-          >
-            <GoogleIcon />
-            Sign in with Google Workspace
-          </button>
-
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-slate-200" />
-            <span className="text-xs font-medium tracking-wide text-slate-400">
-              OR WITH EMAIL
-            </span>
-            <div className="h-px flex-1 bg-slate-200" />
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Work Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg bg-slate-100 px-3.5 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none ring-blue-500 focus:ring-2"
-              />
+          {user ? (
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-slate-900">You're signed in</h1>
+              <p className="mt-2 text-sm text-slate-500">{user.email}</p>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
+              >
+                <LogOut className="h-4 w-4" />
+                Log out
+              </button>
             </div>
+          ) : (
+            <>
+              <h1 className="text-center text-3xl font-bold text-slate-900">Welcome back</h1>
+              <p className="mt-2 text-center text-sm text-slate-500">
+                Sign in to access your company documents and guides
+              </p>
 
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-                  Password
+              {error && (
+                <div className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={loading}
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200 disabled:opacity-60"
+              >
+                <GoogleIcon />
+                Sign in with Google Workspace
+              </button>
+
+              <div className="my-6 flex items-center gap-3">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-xs font-medium tracking-wide text-slate-400">
+                  OR WITH EMAIL
+                </span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Work Email
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="name@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-lg bg-slate-100 px-3.5 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none ring-blue-500 focus:ring-2"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                      Password
+                    </label>
+                    <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                      Forgot password?
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full rounded-lg bg-slate-100 px-3.5 py-3 pr-10 text-sm text-slate-900 outline-none ring-blue-500 focus:ring-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={rememberDevice}
+                    onChange={(e) => setRememberDevice(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Remember this device
                 </label>
-                <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                  Forgot password?
-                </a>
-              </div>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-lg bg-slate-100 px-3.5 py-3 pr-10 text-sm text-slate-900 outline-none ring-blue-500 focus:ring-2"
-                />
+
                 <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                  type="submit"
+                  disabled={loading}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:opacity-60"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {loading ? 'Signing in…' : 'Sign in'}
+                  {!loading && <span aria-hidden="true">&rarr;</span>}
                 </button>
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={rememberDevice}
-                onChange={(e) => setRememberDevice(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              Remember this device
-            </label>
-
-            <button
-              type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-800"
-            >
-              Sign in
-              <span aria-hidden="true">&rarr;</span>
-            </button>
-          </form>
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>
