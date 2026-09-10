@@ -8,6 +8,9 @@ from app.db.models import DocumentStatus, SourceFormat
 class DocumentOut(BaseModel):
     id: str
     filename: str
+    title: str
+    category: str | None
+    is_public: bool
     source_format: SourceFormat
     page_count: int | None
     ocr_used: bool
@@ -15,6 +18,7 @@ class DocumentOut(BaseModel):
     status: DocumentStatus
     error_message: str | None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
