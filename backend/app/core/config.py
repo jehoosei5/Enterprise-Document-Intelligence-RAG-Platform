@@ -32,10 +32,19 @@ class Settings(BaseSettings):
     # --- MySQL ---
     database_url: str = "mysql+pymysql://root:root@localhost:3306/ragdb"
 
-    # --- Auth (reserved for v3) ---
+    # --- Auth ---
     jwt_secret_key: str = "change-me-to-a-long-random-string"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
+
+    # --- Google sign-in ---
+    google_client_id: str = ""
+
+    # --- Password reset (Resend) ---
+    resend_api_key: str = ""
+    resend_from_email: str = "DocIntel <onboarding@resend.dev>"
+    frontend_base_url: str = "http://localhost:5174"
+    password_reset_expire_minutes: int = 30
 
     # --- App ---
     app_env: str = "development"
