@@ -18,7 +18,17 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(60), nullable=False)  # bcrypt hash, fixed 60 chars
+    # Nullable: a Google-only account has no password. hashed_password/google_sub
+    # are independent capability flags, not a single provider enum — an account
+    # can have either or both (see app/api/auth.py's Google sign-in linking logic).
+    hashed_password: Mapped[str | None] = mapped_column(String(60), nullable=True)  # bcrypt hash, fixed 60 chars
+    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+
+    # Forgot-password: one active reset at a time (overwritten on each new
+    # request), token itself never stored raw — only its hash.
+    reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
 
