@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_accessible_doc_ids, get_current_user
 from app.chunking.chunker import chunk_document
 from app.core.config import Settings, get_settings
-from app.db.models import Document, DocumentShare, DocumentStatus, SourceFormat, User
+from app.db.models import Document, DocumentShare, DocumentStatus, QueryLog, SourceFormat, User
 from app.db.session import get_db
 from app.embeddings.azure_embeddings import embed_texts
 from app.embeddings.sparse_embeddings import embed_texts as sparse_embed_texts
@@ -23,6 +23,7 @@ from app.schemas.documents import (
     DocumentUploadResponse,
     ShareRequest,
 )
+from app.schemas.queries import QueryLogSummary
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -131,6 +132,28 @@ def get_document(
     if document is None or document.id not in get_accessible_doc_ids(current_user, db):
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+@router.get("/{document_id}/questions", response_model=list[QueryLogSummary])
+def get_document_questions(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[QueryLog]:
+    document = db.get(Document, document_id)
+    if document is None or document.id not in get_accessible_doc_ids(current_user, db):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Caller's own scoped questions only — same own-only pattern as every
+    # other query-history endpoint (GET /queries etc.), not a new privacy
+    # surface where other users' questions become visible.
+    return (
+        db.query(QueryLog)
+        .filter(QueryLog.scoped_document_id == document_id, QueryLog.user_id == current_user.id)
+        .order_by(QueryLog.created_at.desc())
+        .limit(5)
+        .all()
+    )
 
 
 _FILE_MEDIA_TYPES = {

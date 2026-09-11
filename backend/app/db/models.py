@@ -119,6 +119,12 @@ class QueryLog(Base):
     rewritten_query: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Set when this query was asked via a document's "Ask about this
+    # document" panel — powers that document's "Recent Questions Asked".
+    # Not a FK: the document may since have been deleted, and this is a
+    # read-only historical trace like the rest of this table.
+    scoped_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+
     # Retrieval debug trace: lists of {chunk_id, doc_id, filename, locator, score}-shaped dicts.
     retrieved_dense: Mapped[list | None] = mapped_column(JSON, nullable=True)
     retrieved_sparse: Mapped[list | None] = mapped_column(JSON, nullable=True)
