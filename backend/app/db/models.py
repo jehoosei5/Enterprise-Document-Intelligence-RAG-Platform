@@ -58,6 +58,7 @@ class Document(Base):
     # private draft, or visible to everyone at the company.
     is_public: Mapped[bool] = mapped_column(default=False, nullable=False)
     source_format: Mapped[SourceFormat] = mapped_column(Enum(SourceFormat), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ocr_used: Mapped[bool] = mapped_column(default=False, nullable=False)
     chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -93,6 +93,7 @@ def upload_document(
         category=category,
         is_public=is_public,
         source_format=_source_format_for_ext(ext),
+        size_bytes=dest_path.stat().st_size,
         status=DocumentStatus.PROCESSING,
     )
     db.add(document)
@@ -280,6 +281,7 @@ def update_document_content(
     ext = Path(document.filename).suffix.lower()
     dest_path = settings.upload_path / f"{document_id}{ext}"
     dest_path.write_text(request.content, encoding="utf-8")
+    document.size_bytes = dest_path.stat().st_size
 
     delete_document_vectors(document_id)
     document.status = DocumentStatus.PROCESSING
