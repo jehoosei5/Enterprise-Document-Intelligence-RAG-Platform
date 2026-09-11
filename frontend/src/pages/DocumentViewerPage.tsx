@@ -1,9 +1,21 @@
+import DOMPurify from 'dompurify'
 import { AlertCircle, ArrowLeft, Download, Lock } from 'lucide-react'
+import mammoth from 'mammoth'
+import MarkdownIt from 'markdown-it'
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
+import { parseCsv } from '../lib/csv'
 import { getDocument, getDocumentFile, type DocumentOut } from '../lib/documents'
+
+const md = new MarkdownIt()
+
+type Preview =
+  | { kind: 'pdf'; url: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'csv'; rows: string[][] }
+  | { kind: 'html'; html: string }
 
 export default function DocumentViewerPage() {
   const { token } = useOutletContext<AuthOutletContext>()
@@ -11,35 +23,51 @@ export default function DocumentViewerPage() {
   const navigate = useNavigate()
 
   const [doc, setDoc] = useState<DocumentOut | null>(null)
-  const [objectUrl, setObjectUrl] = useState<string | null>(null)
-  const [textContent, setTextContent] = useState<string | null>(null)
+  const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!id) return
     let cancelled = false
-    let url: string | null = null
+    let objectUrl: string | null = null
 
     setLoading(true)
     setError(null)
+    setPreview(null)
 
     Promise.all([getDocument(token, id), getDocumentFile(token, id)])
-      .then(([meta, file]) => {
+      .then(async ([meta, file]) => {
         if (cancelled) return
         setDoc(meta)
 
-        if (meta.source_format === 'docx') {
-          // No inline preview — Download only.
-          return
-        }
-        if (meta.source_format === 'pdf') {
-          url = URL.createObjectURL(file.blob)
-          setObjectUrl(url)
-        } else {
-          file.blob.text().then((text) => {
-            if (!cancelled) setTextContent(text)
-          })
+        switch (meta.source_format) {
+          case 'pdf': {
+            objectUrl = URL.createObjectURL(file.blob)
+            setPreview({ kind: 'pdf', url: objectUrl })
+            break
+          }
+          case 'csv': {
+            const text = await file.blob.text()
+            setPreview({ kind: 'csv', rows: parseCsv(text) })
+            break
+          }
+          case 'text': {
+            const text = await file.blob.text()
+            setPreview({ kind: 'text', text })
+            break
+          }
+          case 'markdown': {
+            const text = await file.blob.text()
+            setPreview({ kind: 'html', html: DOMPurify.sanitize(md.render(text)) })
+            break
+          }
+          case 'docx': {
+            const arrayBuffer = await file.blob.arrayBuffer()
+            const { value: html } = await mammoth.convertToHtml({ arrayBuffer })
+            setPreview({ kind: 'html', html: DOMPurify.sanitize(html) })
+            break
+          }
         }
       })
       .catch((err) => {
@@ -51,7 +79,7 @@ export default function DocumentViewerPage() {
 
     return () => {
       cancelled = true
-      if (url) URL.revokeObjectURL(url)
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [id, token])
 
@@ -115,32 +143,56 @@ export default function DocumentViewerPage() {
             </div>
 
             <div className="mt-6 overflow-hidden rounded-2xl bg-white shadow-sm">
-              {doc.source_format === 'docx' && (
-                <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
-                  <p className="text-sm font-medium text-slate-700">
-                    Preview isn't available for Word documents
-                  </p>
-                  <p className="text-xs text-slate-400">Use Download to open it in your own editor.</p>
+              {preview?.kind === 'pdf' && (
+                <iframe title={doc.title} src={preview.url} className="h-[80vh] w-full" />
+              )}
+
+              {preview?.kind === 'text' && (
+                <pre className="max-h-[80vh] overflow-auto whitespace-pre-wrap px-6 py-6 text-sm text-slate-700">
+                  {preview.text}
+                </pre>
+              )}
+
+              {preview?.kind === 'csv' && (
+                <div className="max-h-[80vh] overflow-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="sticky top-0 bg-slate-50">
+                      <tr>
+                        {preview.rows[0]?.map((header, i) => (
+                          <th
+                            key={i}
+                            className="border border-slate-200 px-3 py-2 text-left font-semibold text-slate-700"
+                          >
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.slice(1).map((row, i) => (
+                        <tr key={i} className="odd:bg-white even:bg-slate-50/50">
+                          {row.map((cell, j) => (
+                            <td key={j} className="border border-slate-200 px-3 py-2 text-slate-600">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
-              {doc.source_format === 'pdf' &&
-                (objectUrl ? (
-                  <iframe title={doc.title} src={objectUrl} className="h-[80vh] w-full" />
-                ) : (
-                  !loading && <div className="px-6 py-20 text-center text-sm text-slate-400">No preview.</div>
-                ))}
+              {preview?.kind === 'html' && (
+                <div
+                  className="doc-preview max-h-[80vh] overflow-auto px-8 py-6"
+                  dangerouslySetInnerHTML={{ __html: preview.html }}
+                />
+              )}
 
-              {(doc.source_format === 'text' ||
-                doc.source_format === 'markdown' ||
-                doc.source_format === 'csv') &&
-                (textContent !== null ? (
-                  <pre className="max-h-[80vh] overflow-auto whitespace-pre-wrap px-6 py-6 text-sm text-slate-700">
-                    {textContent}
-                  </pre>
-                ) : (
-                  !loading && <div className="px-6 py-20 text-center text-sm text-slate-400">No preview.</div>
-                ))}
+              {!preview && !loading && (
+                <div className="px-6 py-20 text-center text-sm text-slate-400">No preview.</div>
+              )}
             </div>
           </>
         )}

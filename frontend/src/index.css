@@ -3,3 +3,61 @@
 body {
   font-family: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
 }
+
+/* Typography for rendered document previews (mammoth's DOCX->HTML output
+   and markdown-it's Markdown->HTML output share this). */
+.doc-preview {
+  color: #1e293b; /* slate-800 */
+  line-height: 1.7;
+}
+.doc-preview h1,
+.doc-preview h2,
+.doc-preview h3,
+.doc-preview h4 {
+  font-weight: 700;
+  color: #0f172a; /* slate-900 */
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.doc-preview h1 { font-size: 1.75rem; }
+.doc-preview h2 { font-size: 1.5rem; }
+.doc-preview h3 { font-size: 1.25rem; }
+.doc-preview p { margin: 0.75em 0; }
+.doc-preview ul,
+.doc-preview ol {
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+}
+.doc-preview li { margin: 0.25em 0; }
+.doc-preview table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+.doc-preview th,
+.doc-preview td {
+  border: 1px solid #e2e8f0; /* slate-200 */
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+.doc-preview th { background: #f8fafc; /* slate-50 */ font-weight: 600; }
+.doc-preview a { color: #1d4ed8; /* blue-700 */ text-decoration: underline; }
+.doc-preview strong { font-weight: 700; }
+.doc-preview em { font-style: italic; }
+.doc-preview blockquote {
+  border-left: 3px solid #cbd5e1; /* slate-300 */
+  padding-left: 1em;
+  color: #64748b; /* slate-500 */
+  margin: 0.75em 0;
+}
+.doc-preview code {
+  background: #f1f5f9; /* slate-100 */
+  padding: 0.15em 0.4em;
+  border-radius: 0.25em;
+  font-size: 0.9em;
+}
+.doc-preview pre code {
+  display: block;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
