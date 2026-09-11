@@ -1,6 +1,8 @@
 import {
   ArrowUpDown,
+  Download,
   Edit3,
+  Eye,
   FileSpreadsheet,
   FileText,
   Grid3x3,
@@ -25,6 +27,7 @@ import { CATEGORIES } from '../lib/categories'
 import {
   deleteDocument,
   EDITABLE_FORMATS,
+  getDocumentFile,
   listDocuments,
   updateDocument,
   type DocumentOut,
@@ -46,6 +49,16 @@ const FORMAT_META: Record<SourceFormat, { label: string; icon: typeof FileText; 
 }
 
 const FORMAT_FILTERS: SourceFormat[] = ['pdf', 'docx', 'text', 'markdown', 'csv']
+
+// Distinct pastel per category so badges read at a glance in the grid,
+// matching each of the four fixed categories in lib/categories.ts.
+const CATEGORY_STYLES: Record<string, string> = {
+  'HR Policy': 'bg-rose-50 text-rose-700',
+  Benefits: 'bg-blue-50 text-blue-700',
+  Contracts: 'bg-amber-50 text-amber-700',
+  Onboarding: 'bg-violet-50 text-violet-700',
+}
+const DEFAULT_CATEGORY_STYLE = 'bg-slate-100 text-slate-600'
 
 const PAGE_SIZE = 9
 
@@ -185,9 +198,20 @@ interface DocItemProps {
   onRename: (doc: DocumentOut) => void
   onEditContent: (doc: DocumentOut) => void
   onDelete: (doc: DocumentOut) => void
+  onDownload: (e: React.MouseEvent, doc: DocumentOut) => void
 }
 
-function DocCard({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete }: DocItemProps) {
+function CategoryBadge({ category }: { category: string }) {
+  return (
+    <span
+      className={`rounded-full px-2.5 py-1 text-xs font-medium ${CATEGORY_STYLES[category] ?? DEFAULT_CATEGORY_STYLE}`}
+    >
+      {category}
+    </span>
+  )
+}
+
+function DocCard({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete, onDownload }: DocItemProps) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
@@ -200,11 +224,7 @@ function DocCard({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelet
           <Icon className="h-5 w-5" />
         </div>
         <div className="flex items-center gap-1">
-          {doc.category && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {doc.category}
-            </span>
-          )}
+          {doc.category && <CategoryBadge category={doc.category} />}
           {!doc.is_public && <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-label="Just me" />}
           <DocMenu
             doc={doc}
@@ -224,12 +244,23 @@ function DocCard({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelet
       </div>
       <div className="mt-auto flex items-center justify-between pt-4 text-xs text-slate-400">
         <span>Updated {relativeDate(doc.updated_at)}</span>
+        <span className="flex items-center gap-2">
+          <Eye className="h-4 w-4" aria-label="Preview" />
+          <button
+            type="button"
+            onClick={(e) => onDownload(e, doc)}
+            aria-label="Download"
+            className="hover:text-slate-600"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+        </span>
       </div>
     </Link>
   )
 }
 
-function DocRow({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete }: DocItemProps) {
+function DocRow({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete, onDownload }: DocItemProps) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
@@ -244,16 +275,18 @@ function DocRow({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete
         <p className="truncate text-sm font-medium text-slate-900">{doc.title}</p>
         <p className="truncate text-xs text-slate-400">{doc.filename}</p>
       </div>
-      {doc.category && (
-        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-          {doc.category}
-        </span>
-      )}
+      {doc.category && <CategoryBadge category={doc.category} />}
       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[doc.status]}`}>
         {doc.status}
       </span>
       <span className="shrink-0 text-slate-400">{doc.is_public ? null : <Lock className="h-4 w-4" />}</span>
       <span className="w-20 shrink-0 text-right text-xs text-slate-400">{relativeDate(doc.updated_at)}</span>
+      <span className="flex shrink-0 items-center gap-2 text-slate-400">
+        <Eye className="h-4 w-4" aria-label="Preview" />
+        <button type="button" onClick={(e) => onDownload(e, doc)} aria-label="Download" className="hover:text-slate-600">
+          <Download className="h-4 w-4" />
+        </button>
+      </span>
       <DocMenu
         doc={doc}
         isOpen={menuOpen}
@@ -337,6 +370,22 @@ export default function DocumentsPage() {
       setDocuments((docs) => docs?.filter((d) => d.id !== doc.id) ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete this document.')
+    }
+  }
+
+  async function handleDownload(e: React.MouseEvent, doc: DocumentOut) {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      const { blob } = await getDocumentFile(token, doc.id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = doc.filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download this document.')
     }
   }
 
@@ -459,6 +508,7 @@ export default function DocumentsPage() {
                     onRename={handleRename}
                     onEditContent={handleEditContent}
                     onDelete={handleDelete}
+                    onDownload={handleDownload}
                   />
                 ))}
               </div>
@@ -473,6 +523,7 @@ export default function DocumentsPage() {
                     onRename={handleRename}
                     onEditContent={handleEditContent}
                     onDelete={handleDelete}
+                    onDownload={handleDownload}
                   />
                 ))}
               </div>
