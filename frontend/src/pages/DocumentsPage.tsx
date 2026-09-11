@@ -1,24 +1,35 @@
 import {
   ArrowUpDown,
+  Edit3,
   FileSpreadsheet,
   FileText,
   Grid3x3,
   LayoutList,
   Lock,
   MessageCircle,
+  MoreVertical,
+  Pencil,
   Plus,
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UploadCloud,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
 import Sidebar from '../components/Sidebar'
 import { CATEGORIES } from '../lib/categories'
-import { listDocuments, type DocumentOut, type SourceFormat } from '../lib/documents'
+import {
+  deleteDocument,
+  EDITABLE_FORMATS,
+  listDocuments,
+  updateDocument,
+  type DocumentOut,
+  type SourceFormat,
+} from '../lib/documents'
 
 const STATUS_STYLES: Record<DocumentOut['status'], string> = {
   ready: 'bg-emerald-50 text-emerald-700',
@@ -95,7 +106,88 @@ function EmptyState() {
   )
 }
 
-function DocCard({ doc }: { doc: DocumentOut }) {
+interface DocMenuProps {
+  doc: DocumentOut
+  isOpen: boolean
+  onToggle: () => void
+  onRename: (doc: DocumentOut) => void
+  onEditContent: (doc: DocumentOut) => void
+  onDelete: (doc: DocumentOut) => void
+}
+
+function DocMenu({ doc, isOpen, onToggle, onRename, onEditContent, onDelete }: DocMenuProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onToggle()
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isOpen, onToggle])
+
+  return (
+    <div
+      ref={ref}
+      className="relative shrink-0"
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label="More actions"
+        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {isOpen && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-xs shadow-md">
+          <button
+            type="button"
+            onClick={() => onRename(doc)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+          >
+            <Pencil className="h-3 w-3" />
+            Rename
+          </button>
+          {EDITABLE_FORMATS.includes(doc.source_format) && (
+            <button
+              type="button"
+              onClick={() => onEditContent(doc)}
+              className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+            >
+              <Edit3 className="h-3 w-3" />
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onDelete(doc)}
+            className="flex w-full items-center gap-1.5 border-t border-slate-100 px-2.5 py-1.5 text-left text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="h-3 w-3" />
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface DocItemProps {
+  doc: DocumentOut
+  menuOpen: boolean
+  onToggleMenu: () => void
+  onRename: (doc: DocumentOut) => void
+  onEditContent: (doc: DocumentOut) => void
+  onDelete: (doc: DocumentOut) => void
+}
+
+function DocCard({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete }: DocItemProps) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
@@ -107,13 +199,21 @@ function DocCard({ doc }: { doc: DocumentOut }) {
         <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${meta.className}`}>
           <Icon className="h-5 w-5" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {doc.category && (
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               {doc.category}
             </span>
           )}
-          {!doc.is_public && <Lock className="h-3.5 w-3.5 text-slate-400" aria-label="Just me" />}
+          {!doc.is_public && <Lock className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-label="Just me" />}
+          <DocMenu
+            doc={doc}
+            isOpen={menuOpen}
+            onToggle={onToggleMenu}
+            onRename={onRename}
+            onEditContent={onEditContent}
+            onDelete={onDelete}
+          />
         </div>
       </div>
       <p className="mt-3 line-clamp-2 text-sm font-semibold text-slate-900">{doc.title}</p>
@@ -129,7 +229,7 @@ function DocCard({ doc }: { doc: DocumentOut }) {
   )
 }
 
-function DocRow({ doc }: { doc: DocumentOut }) {
+function DocRow({ doc, menuOpen, onToggleMenu, onRename, onEditContent, onDelete }: DocItemProps) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
@@ -154,6 +254,14 @@ function DocRow({ doc }: { doc: DocumentOut }) {
       </span>
       <span className="shrink-0 text-slate-400">{doc.is_public ? null : <Lock className="h-4 w-4" />}</span>
       <span className="w-20 shrink-0 text-right text-xs text-slate-400">{relativeDate(doc.updated_at)}</span>
+      <DocMenu
+        doc={doc}
+        isOpen={menuOpen}
+        onToggle={onToggleMenu}
+        onRename={onRename}
+        onEditContent={onEditContent}
+        onDelete={onDelete}
+      />
     </Link>
   )
 }
@@ -172,6 +280,7 @@ export default function DocumentsPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [dragActive, setDragActive] = useState(false)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   useEffect(() => {
     setDocuments(null)
@@ -200,6 +309,35 @@ export default function DocumentsPage() {
 
   function goToUploadWithFile(file: File) {
     navigate('/documents/upload', { state: { droppedFile: file } })
+  }
+
+  async function handleRename(doc: DocumentOut) {
+    const next = window.prompt('Rename document', doc.title)
+    setOpenMenuId(null)
+    const trimmed = next?.trim()
+    if (!trimmed || trimmed === doc.title) return
+    try {
+      const updated = await updateDocument(token, doc.id, { title: trimmed })
+      setDocuments((docs) => docs?.map((d) => (d.id === updated.id ? updated : d)) ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rename this document.')
+    }
+  }
+
+  function handleEditContent(doc: DocumentOut) {
+    setOpenMenuId(null)
+    navigate(`/documents/${doc.id}`, { state: { autoEdit: true } })
+  }
+
+  async function handleDelete(doc: DocumentOut) {
+    setOpenMenuId(null)
+    if (!window.confirm(`Delete "${doc.title}"? This can't be undone.`)) return
+    try {
+      await deleteDocument(token, doc.id)
+      setDocuments((docs) => docs?.filter((d) => d.id !== doc.id) ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete this document.')
+    }
   }
 
   return (
@@ -313,13 +451,29 @@ export default function DocumentsPage() {
             {view === 'grid' ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {visible.map((doc) => (
-                  <DocCard key={doc.id} doc={doc} />
+                  <DocCard
+                    key={doc.id}
+                    doc={doc}
+                    menuOpen={openMenuId === doc.id}
+                    onToggleMenu={() => setOpenMenuId((cur) => (cur === doc.id ? null : doc.id))}
+                    onRename={handleRename}
+                    onEditContent={handleEditContent}
+                    onDelete={handleDelete}
+                  />
                 ))}
               </div>
             ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 {visible.map((doc) => (
-                  <DocRow key={doc.id} doc={doc} />
+                  <DocRow
+                    key={doc.id}
+                    doc={doc}
+                    menuOpen={openMenuId === doc.id}
+                    onToggleMenu={() => setOpenMenuId((cur) => (cur === doc.id ? null : doc.id))}
+                    onRename={handleRename}
+                    onEditContent={handleEditContent}
+                    onDelete={handleDelete}
+                  />
                 ))}
               </div>
             )}

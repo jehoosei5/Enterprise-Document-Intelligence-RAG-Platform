@@ -3,6 +3,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000
 export type SourceFormat = 'pdf' | 'docx' | 'markdown' | 'text' | 'csv'
 export type DocumentStatus = 'processing' | 'ready' | 'failed'
 
+// Formats content-editing supports — must match the backend's
+// _TEXT_BACKED_FORMATS in app/api/documents.py.
+export const EDITABLE_FORMATS: SourceFormat[] = ['text', 'markdown', 'csv']
+
 export interface DocumentOut {
   id: string
   filename: string
@@ -51,6 +55,42 @@ export async function getDocumentFile(
   if (!res.ok) return parseErrorOrThrow(res)
   const blob = await res.blob()
   return { blob, contentType: res.headers.get('content-type') ?? 'application/octet-stream' }
+}
+
+export async function updateDocument(
+  token: string,
+  id: string,
+  params: { title?: string; category?: string | null; is_public?: boolean },
+): Promise<DocumentOut> {
+  const res = await fetch(`${API_BASE_URL}/documents/${id}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+  return res.json()
+}
+
+export async function deleteDocument(token: string, id: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/documents/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+}
+
+export async function updateDocumentContent(
+  token: string,
+  id: string,
+  content: string,
+): Promise<DocumentOut> {
+  const res = await fetch(`${API_BASE_URL}/documents/${id}/content`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+  return res.json()
 }
 
 export async function uploadDocument(
