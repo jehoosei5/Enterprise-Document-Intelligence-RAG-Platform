@@ -99,7 +99,10 @@ function DocCard({ doc }: { doc: DocumentOut }) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 transition hover:shadow-sm">
+    <Link
+      to={`/documents/${doc.id}`}
+      className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 transition hover:shadow-sm"
+    >
       <div className="flex items-start justify-between">
         <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${meta.className}`}>
           <Icon className="h-5 w-5" />
@@ -122,7 +125,7 @@ function DocCard({ doc }: { doc: DocumentOut }) {
       <div className="mt-auto flex items-center justify-between pt-4 text-xs text-slate-400">
         <span>Updated {relativeDate(doc.updated_at)}</span>
       </div>
-    </div>
+    </Link>
   )
 }
 
@@ -130,7 +133,10 @@ function DocRow({ doc }: { doc: DocumentOut }) {
   const meta = FORMAT_META[doc.source_format]
   const Icon = meta.icon
   return (
-    <div className="flex items-center gap-4 border-b border-slate-100 px-5 py-4 last:border-0">
+    <Link
+      to={`/documents/${doc.id}`}
+      className="flex items-center gap-4 border-b border-slate-100 px-5 py-4 last:border-0 hover:bg-slate-50"
+    >
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${meta.className}`}>
         <Icon className="h-5 w-5" />
       </div>
@@ -148,7 +154,7 @@ function DocRow({ doc }: { doc: DocumentOut }) {
       </span>
       <span className="shrink-0 text-slate-400">{doc.is_public ? null : <Lock className="h-4 w-4" />}</span>
       <span className="w-20 shrink-0 text-right text-xs text-slate-400">{relativeDate(doc.updated_at)}</span>
-    </div>
+    </Link>
   )
 }
 

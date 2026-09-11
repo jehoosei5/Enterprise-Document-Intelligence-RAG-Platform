@@ -33,6 +33,26 @@ export async function listDocuments(token: string, category?: string): Promise<D
   return res.json()
 }
 
+export async function getDocument(token: string, id: string): Promise<DocumentOut> {
+  const res = await fetch(`${API_BASE_URL}/documents/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+  return res.json()
+}
+
+export async function getDocumentFile(
+  token: string,
+  id: string,
+): Promise<{ blob: Blob; contentType: string }> {
+  const res = await fetch(`${API_BASE_URL}/documents/${id}/file`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+  const blob = await res.blob()
+  return { blob, contentType: res.headers.get('content-type') ?? 'application/octet-stream' }
+}
+
 export async function uploadDocument(
   token: string,
   params: { file: File; title: string; category: string | null; isPublic: boolean },
