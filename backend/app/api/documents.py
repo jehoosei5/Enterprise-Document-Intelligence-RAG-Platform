@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_accessible_doc_ids, get_current_user
@@ -110,6 +111,35 @@ def get_document(
     if document is None or document.id not in get_accessible_doc_ids(current_user, db):
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+_FILE_MEDIA_TYPES = {
+    SourceFormat.PDF: "application/pdf",
+    SourceFormat.DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    SourceFormat.MARKDOWN: "text/plain",
+    SourceFormat.TEXT: "text/plain",
+    SourceFormat.CSV: "text/csv",
+}
+
+
+@router.get("/{document_id}/file")
+def get_document_file(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    document = db.get(Document, document_id)
+    # 404 (not 403) for an inaccessible doc — same reasoning as get_document above.
+    if document is None or document.id not in get_accessible_doc_ids(current_user, db):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    settings = get_settings()
+    ext = Path(document.filename).suffix.lower()
+    file_path = settings.upload_path / f"{document_id}{ext}"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    return FileResponse(file_path, media_type=_FILE_MEDIA_TYPES[document.source_format])
 
 
 @router.post("/{document_id}/share", status_code=204)
