@@ -14,6 +14,7 @@ export interface DocumentOut {
   category: string | null
   is_public: boolean
   source_format: SourceFormat
+  size_bytes: number
   page_count: number | null
   ocr_used: boolean
   chunk_count: number | null
@@ -21,6 +22,12 @@ export interface DocumentOut {
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 async function parseErrorOrThrow(res: Response): Promise<never> {

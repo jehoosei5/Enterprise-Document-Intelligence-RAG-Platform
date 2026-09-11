@@ -30,6 +30,7 @@ import { parseCsv } from '../lib/csv'
 import {
   deleteDocument,
   EDITABLE_FORMATS,
+  formatFileSize,
   getDocument,
   getDocumentFile,
   updateDocument,
@@ -581,6 +582,7 @@ export default function DocumentViewerPage() {
                       Just me
                     </span>
                   )}
+                  <span className="text-xs text-slate-400">{formatFileSize(doc.size_bytes)}</span>
                   <span className="text-xs text-slate-400">Updated {relativeDate(doc.updated_at)}</span>
                 </div>
               </div>
