@@ -29,3 +29,13 @@ class DocumentUploadResponse(DocumentOut):
 
 class ShareRequest(BaseModel):
     email: EmailStr
+
+
+class DocumentUpdateRequest(BaseModel):
+    title: str | None = None
+    category: str | None = None
+    is_public: bool | None = None
+
+
+class DocumentContentUpdateRequest(BaseModel):
+    content: str
