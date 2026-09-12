@@ -15,7 +15,7 @@ import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
 import { ApiError } from '../lib/api'
-import { CATEGORIES } from '../lib/categories'
+import { useCategories } from '../lib/categories'
 import { uploadDocument } from '../lib/documents'
 
 function stripExtension(filename: string): string {
@@ -41,13 +41,12 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(droppedFile)
   const [dragActive, setDragActive] = useState(false)
   const [title, setTitle] = useState(droppedFile ? stripExtension(droppedFile.name) : '')
-  const [category, setCategory] = useState<string | null>(null)
-  const [customCategory, setCustomCategory] = useState('')
-  const [showCustomCategory, setShowCustomCategory] = useState(false)
+  const [category, setCategory] = useState('')
   const [isPublic, setIsPublic] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { categories } = useCategories(token)
 
   function selectFile(f: File) {
     setFile(f)
@@ -64,7 +63,7 @@ export default function UploadPage() {
 
   async function handleSubmit() {
     if (!file || !title.trim()) return
-    const effectiveCategory = showCustomCategory ? customCategory.trim() || null : category
+    const effectiveCategory = category.trim() || null
     setLoading(true)
     setError(null)
     try {
@@ -189,50 +188,33 @@ export default function UploadPage() {
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-slate-700">Category Tag</span>
-                  <span className="text-xs text-slate-400">Optional</span>
+                  <span className="text-xs text-slate-400 text-red-500">Required</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {CATEGORIES.map((cat) => {
-                    const selected = !showCustomCategory && category === cat.value
-                    return (
+                {categories.length > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    {categories.map((cat) => (
                       <button
-                        key={cat.value}
+                        key={cat}
                         type="button"
-                        onClick={() => {
-                          setShowCustomCategory(false)
-                          setCategory(cat.value)
-                        }}
+                        onClick={() => setCategory(cat)}
                         className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                          selected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          category === cat
+                            ? 'bg-blue-700 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
-                        {selected && <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />}
-                        {cat.label}
+                        {category === cat && <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />}
+                        {cat}
                       </button>
-                    )
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCustomCategory(true)
-                      setCategory(null)
-                    }}
-                    className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                      showCustomCategory ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    + Add custom tag
-                  </button>
-                </div>
-                {showCustomCategory && (
-                  <input
-                    autoFocus
-                    value={customCategory}
-                    onChange={(e) => setCustomCategory(e.target.value)}
-                    placeholder="Custom category name"
-                    className="mt-2 w-full rounded-lg bg-slate-100 px-3.5 py-2.5 text-sm text-slate-900 outline-none ring-blue-500 focus:ring-2"
-                  />
+                    ))}
+                  </div>
                 )}
+                <input
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="e.g. Policies, Guides, Onboarding"
+                  className="w-full rounded-lg bg-slate-100 px-3.5 py-2.5 text-sm text-slate-900 outline-none ring-blue-500 focus:ring-2"
+                />
               </div>
 
               <div>
@@ -291,7 +273,7 @@ export default function UploadPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={loading || !title.trim()}
+                    disabled={loading || !title.trim() || !category.trim()}
                     onClick={handleSubmit}
                     className="flex items-center gap-2 rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:opacity-60"
                   >
