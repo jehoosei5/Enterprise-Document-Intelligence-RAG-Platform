@@ -5,12 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, conversations, documents, health, queries, query
 from app.core.config import get_settings
+from app.embeddings.sparse_embeddings import warm_up as warm_up_sparse_model
 from app.retrieval.qdrant_store import ensure_collection
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_collection()
+    warm_up_sparse_model()
     yield
 
 
