@@ -17,15 +17,6 @@ def _model() -> SparseTextEmbedding:
     return SparseTextEmbedding(model_name=_MODEL_NAME)
 
 
-def warm_up() -> None:
-    """Forces the model to download/initialize now, at app startup, rather
-    than silently during a real user's first upload or chat message —
-    Railway's container filesystem is ephemeral, so this download would
-    otherwise happen fresh after every redeploy at an unpredictable moment.
-    """
-    _model()
-
-
 def embed_texts(texts: list[str]) -> list[qmodels.SparseVector]:
     if not texts:
         return []

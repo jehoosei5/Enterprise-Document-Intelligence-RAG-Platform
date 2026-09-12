@@ -57,11 +57,7 @@ def get_conversation(
         created_at=conversation.created_at,
         turns=[
             ConversationTurn(
-                query_id=log.id,
-                question=log.question,
-                answer=log.answer,
-                sources=log.sources or [],
-                created_at=log.created_at,
+                query_id=log.id, question=log.question, answer=log.answer, created_at=log.created_at
             )
             for log in logs
         ],
