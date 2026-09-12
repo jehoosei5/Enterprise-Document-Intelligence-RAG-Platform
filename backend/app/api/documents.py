@@ -1,13 +1,15 @@
-import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.api.deps import get_accessible_doc_ids, get_current_user
 from app.chunking.chunker import chunk_document
+from app.core import storage
 from app.core.config import Settings, get_settings
 from app.db.models import Document, DocumentShare, DocumentStatus, QueryLog, SourceFormat, User
 from app.db.session import get_db
@@ -81,30 +83,39 @@ def upload_document(
         )
 
     doc_id = str(uuid.uuid4())
-    dest_path = settings.upload_path / f"{doc_id}{ext}"
-    with dest_path.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
 
-    document = Document(
-        id=doc_id,
-        owner_id=current_user.id,
-        filename=file.filename or dest_path.name,
-        title=title.strip() or (file.filename or dest_path.name),
-        category=category,
-        is_public=is_public,
-        source_format=_source_format_for_ext(ext),
-        size_bytes=dest_path.stat().st_size,
-        status=DocumentStatus.PROCESSING,
-    )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
+    # Parsing needs a real local file path (every parser in app/ingestion/
+    # takes file_path: str, none accept bytes) — write to a temp file for
+    # that, upload it to R2 (the actual persistent storage), then discard
+    # the temp copy. No permanent local file is ever created.
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(file.file.read())
+        tmp_path = Path(tmp.name)
 
-    _ingest_and_index(document, dest_path, settings)
+    try:
+        document = Document(
+            id=doc_id,
+            owner_id=current_user.id,
+            filename=file.filename or f"{doc_id}{ext}",
+            title=title.strip() or (file.filename or f"{doc_id}{ext}"),
+            category=category,
+            is_public=is_public,
+            source_format=_source_format_for_ext(ext),
+            size_bytes=tmp_path.stat().st_size,
+            status=DocumentStatus.PROCESSING,
+        )
+        db.add(document)
+        db.commit()
+        db.refresh(document)
 
-    db.commit()
-    db.refresh(document)
-    return document
+        _ingest_and_index(document, tmp_path, settings)
+        storage.upload_file(tmp_path, storage.object_key(doc_id, ext))
+
+        db.commit()
+        db.refresh(document)
+        return document
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -177,13 +188,19 @@ def get_document_file(
     if document is None or document.id not in get_accessible_doc_ids(current_user, db):
         raise HTTPException(status_code=404, detail="Document not found")
 
-    settings = get_settings()
     ext = Path(document.filename).suffix.lower()
-    file_path = settings.upload_path / f"{document_id}{ext}"
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    try:
+        tmp_path = storage.download_to_temp(storage.object_key(document_id, ext), suffix=ext)
+    except Exception as e:  # noqa: BLE001 — boto3 raises its own ClientError types
+        raise HTTPException(status_code=404, detail="File not found in storage") from e
 
-    return FileResponse(file_path, media_type=_FILE_MEDIA_TYPES[document.source_format])
+    # Cleanup happens after the response finishes streaming, not before —
+    # FileResponse reads from this path lazily while sending the body.
+    return FileResponse(
+        tmp_path,
+        media_type=_FILE_MEDIA_TYPES[document.source_format],
+        background=BackgroundTask(tmp_path.unlink, missing_ok=True),
+    )
 
 
 @router.post("/{document_id}/share", status_code=204)
@@ -255,8 +272,7 @@ def delete_document(
     delete_document_vectors(document_id)
 
     ext = Path(document.filename).suffix.lower()
-    file_path = get_settings().upload_path / f"{document_id}{ext}"
-    file_path.unlink(missing_ok=True)
+    storage.delete_file(storage.object_key(document_id, ext))
 
     db.delete(document)
     db.commit()
@@ -279,19 +295,26 @@ def update_document_content(
 
     settings = get_settings()
     ext = Path(document.filename).suffix.lower()
-    dest_path = settings.upload_path / f"{document_id}{ext}"
-    dest_path.write_text(request.content, encoding="utf-8")
-    document.size_bytes = dest_path.stat().st_size
 
-    delete_document_vectors(document_id)
-    document.status = DocumentStatus.PROCESSING
-    db.commit()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=ext, delete=False, encoding="utf-8") as tmp:
+        tmp.write(request.content)
+        tmp_path = Path(tmp.name)
 
-    _ingest_and_index(document, dest_path, settings)
+    try:
+        document.size_bytes = tmp_path.stat().st_size
 
-    db.commit()
-    db.refresh(document)
-    return document
+        delete_document_vectors(document_id)
+        document.status = DocumentStatus.PROCESSING
+        db.commit()
+
+        _ingest_and_index(document, tmp_path, settings)
+        storage.upload_file(tmp_path, storage.object_key(document_id, ext))
+
+        db.commit()
+        db.refresh(document)
+        return document
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _source_format_for_ext(ext: str) -> SourceFormat:

@@ -22,6 +22,9 @@ fastembed==0.4.2       # local BM25 sparse-vector encoder, pairs with qdrant-cli
 # --- Reranker ---
 cohere==5.13.4
 
+# --- File storage (Cloudflare R2, S3-compatible) ---
+boto3==1.35.90
+
 # --- Document parsing ---
 pymupdf==1.25.1        # PDF text + page rasterization for OCR fallback
 pytesseract==0.3.13     # OCR (requires the Tesseract binary installed on the host)
