@@ -58,6 +58,7 @@ class Document(Base):
     # private draft, or visible to everyone at the company.
     is_public: Mapped[bool] = mapped_column(default=False, nullable=False)
     source_format: Mapped[SourceFormat] = mapped_column(Enum(SourceFormat), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ocr_used: Mapped[bool] = mapped_column(default=False, nullable=False)
     chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -118,6 +119,12 @@ class QueryLog(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     rewritten_query: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Set when this query was asked via a document's "Ask about this
+    # document" panel — powers that document's "Recent Questions Asked".
+    # Not a FK: the document may since have been deleted, and this is a
+    # read-only historical trace like the rest of this table.
+    scoped_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     # Retrieval debug trace: lists of {chunk_id, doc_id, filename, locator, score}-shaped dicts.
     retrieved_dense: Mapped[list | None] = mapped_column(JSON, nullable=True)

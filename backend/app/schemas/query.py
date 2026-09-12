@@ -6,6 +6,10 @@ class QueryRequest(BaseModel):
     top_k: int | None = Field(default=None, ge=1, le=20)
     evaluate: bool = True
     conversation_id: str | None = None
+    # When set, retrieval is restricted to just this one document (the
+    # "Ask about this document" panel on the viewer page) instead of
+    # everything the caller can access.
+    document_id: str | None = None
 
 
 class SourceOut(BaseModel):

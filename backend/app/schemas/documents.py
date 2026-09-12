@@ -12,6 +12,7 @@ class DocumentOut(BaseModel):
     category: str | None
     is_public: bool
     source_format: SourceFormat
+    size_bytes: int
     page_count: int | None
     ocr_used: bool
     chunk_count: int | None
@@ -29,3 +30,13 @@ class DocumentUploadResponse(DocumentOut):
 
 class ShareRequest(BaseModel):
     email: EmailStr
+
+
+class DocumentUpdateRequest(BaseModel):
+    title: str | None = None
+    category: str | None = None
+    is_public: bool | None = None
+
+
+class DocumentContentUpdateRequest(BaseModel):
+    content: str

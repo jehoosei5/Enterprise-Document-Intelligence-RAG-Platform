@@ -125,6 +125,12 @@ def query(
     conversation = _get_or_create_conversation(request, db, current_user)
     accessible_doc_ids = get_accessible_doc_ids(current_user, db)
 
+    if request.document_id:
+        if request.document_id not in accessible_doc_ids:
+            # 404, not 403 — same reasoning as the document endpoints.
+            raise HTTPException(status_code=404, detail="Document not found")
+        accessible_doc_ids = [request.document_id]
+
     if not accessible_doc_ids:
         log = QueryLog(
             user_id=current_user.id,
@@ -133,6 +139,7 @@ def query(
             rewritten_query=request.question,
             answer="You don't have access to any documents yet.",
             model=settings.azure_openai_chat_deployment,
+            scoped_document_id=request.document_id,
             latency_total_ms=int((time.perf_counter() - total_start) * 1000),
         )
         db.add(log)
@@ -173,6 +180,7 @@ def query(
         question=request.question,
         rewritten_query=pipeline.rewritten,
         answer=result.answer,
+        scoped_document_id=request.document_id,
         retrieved_dense=[_chunk_debug_dict(c) for c in pipeline.debug_dense],
         retrieved_sparse=[_chunk_debug_dict(c) for c in pipeline.debug_sparse],
         fused_candidates=[_chunk_debug_dict(c) for c in pipeline.candidates],
