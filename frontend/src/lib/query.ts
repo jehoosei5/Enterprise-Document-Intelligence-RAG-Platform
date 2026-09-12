@@ -35,15 +35,36 @@ async function parseErrorOrThrow(res: Response): Promise<never> {
   throw new Error(data?.detail ?? `Request failed with status ${res.status}`)
 }
 
-export async function askAboutDocument(
+export async function askQuery(
   token: string,
-  documentId: string,
-  question: string,
+  params: { question: string; document_id?: string; conversation_id?: string; evaluate?: boolean }
 ): Promise<QueryResponse> {
   const res = await fetch(`${API_BASE_URL}/query`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, document_id: documentId, evaluate: false }),
+    body: JSON.stringify({
+      question: params.question,
+      document_id: params.document_id ?? null,
+      conversation_id: params.conversation_id ?? null,
+      evaluate: params.evaluate ?? false,
+    }),
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+  return res.json()
+}
+
+export async function submitFeedback(token: string, queryId: string, rating: 'up' | 'down'): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/queries/${queryId}/feedback`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  })
+  if (!res.ok) return parseErrorOrThrow(res)
+}
+
+export async function getQueryDetails(token: string, queryId: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/queries/${queryId}`, {
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) return parseErrorOrThrow(res)
   return res.json()

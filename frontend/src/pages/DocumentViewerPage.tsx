@@ -51,7 +51,7 @@ import {
   type DocumentOut,
   type SourceFormat,
 } from '../lib/documents'
-import { askAboutDocument, getDocumentQuestions, type QueryLogSummary, type SourceOut } from '../lib/query'
+import { askQuery, getDocumentQuestions, type QueryLogSummary, type SourceOut } from '../lib/query'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
 
@@ -549,7 +549,7 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
     setChatError(null)
     setQuestion('')
     try {
-      const res = await askAboutDocument(token, documentId, trimmed)
+      const res = await askQuery(token, { question: trimmed, document_id: documentId })
       setTurns((t) => [...t, { question: trimmed, answer: res.answer, sources: res.sources }])
       getDocumentQuestions(token, documentId)
         .then(setRecentQuestions)

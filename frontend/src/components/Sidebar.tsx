@@ -24,10 +24,18 @@ export default function Sidebar({ userEmail, token }: { userEmail: string; token
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3">
-        <p className="px-3 pb-2 text-xs font-semibold tracking-wide text-slate-400">WORKSPACE</p>
+        <NavLink to="/chat" className={({ isActive }) => navLinkClasses(isActive)}>
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Chat
+          </div>
+        </NavLink>
 
         <NavLink to="/documents" end className={({ isActive }) => navLinkClasses(isActive && !activeCategory)}>
-          All Documents
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            All Documents
+          </div>
         </NavLink>
 
         {categories.map((cat) => (
@@ -40,13 +48,7 @@ export default function Sidebar({ userEmail, token }: { userEmail: string; token
           </NavLink>
         ))}
 
-        <div
-          title="Chat isn't built yet"
-          className="mt-1 flex cursor-not-allowed items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300"
-        >
-          <MessageSquare className="h-4 w-4" />
-          Chat
-        </div>
+
       </nav>
 
       <div className="flex items-center gap-2 border-t border-slate-200 px-4 py-4">
