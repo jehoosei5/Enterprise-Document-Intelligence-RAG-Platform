@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # --- Google sign-in ---
     google_client_id: str = ""
 
+    # --- File storage (Cloudflare R2, S3-compatible) ---
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_endpoint: str = ""
+    r2_bucket_name: str = ""
+
     # --- Password reset (Resend) ---
     resend_api_key: str = ""
     resend_from_email: str = "DocIntel <onboarding@resend.dev>"
@@ -48,7 +54,6 @@ class Settings(BaseSettings):
 
     # --- App ---
     app_env: str = "development"
-    upload_dir: str = "./data/uploads"
     log_level: str = "INFO"
 
     # --- Chunking ---
@@ -66,12 +71,6 @@ class Settings(BaseSettings):
 
     # --- Conversation memory ---
     conversation_history_turns: int = 6  # prior Q&A turns fed into query rewriting for follow-up resolution
-
-    @property
-    def upload_path(self) -> Path:
-        p = Path(self.upload_dir)
-        p.mkdir(parents=True, exist_ok=True)
-        return p
 
 
 @lru_cache
