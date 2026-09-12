@@ -4,6 +4,7 @@ import {
   Copy,
   FileText,
   MessageSquare,
+  Plus,
   RotateCw,
   ShieldCheck,
   Sparkles,
@@ -11,12 +12,22 @@ import {
   ThumbsUp,
   User as UserIcon,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
 import Sidebar from '../components/Sidebar'
-import { askQuery, submitFeedback, type QueryResponse } from '../lib/query'
+import { getConversation, listConversations, type ConversationSummary } from '../lib/conversations'
+import { askQueryStream, submitFeedback, type QueryResponse } from '../lib/query'
+
+function relativeDate(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(diffMs / 86_400_000)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 30) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
+}
 
 // We represent a conversation turn locally.
 interface ChatTurn {
@@ -26,7 +37,7 @@ interface ChatTurn {
   answer: string
   sources: QueryResponse['sources']
   timestamp: string
-  status: 'loading' | 'success' | 'error'
+  status: 'loading' | 'streaming' | 'success' | 'error'
   feedback?: 'up' | 'down'
 }
 
@@ -36,8 +47,52 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [asking, setAsking] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
-  
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [loadingConversation, setLoadingConversation] = useState(false)
+
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const refreshConversations = async () => {
+    try {
+      setConversations(await listConversations(token))
+    } catch (err) {
+      console.error('Failed to load conversation history', err)
+    }
+  }
+
+  useEffect(() => {
+    refreshConversations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleNewThread = () => {
+    setTurns([])
+    setConversationId(null)
+  }
+
+  const handleSelectConversation = async (id: string) => {
+    if (id === conversationId || loadingConversation) return
+    setLoadingConversation(true)
+    try {
+      const detail = await getConversation(token, id)
+      setTurns(
+        detail.turns.map((t) => ({
+          id: t.query_id,
+          query_id: t.query_id,
+          question: t.question,
+          answer: t.answer,
+          sources: t.sources,
+          timestamp: new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'success' as const,
+        })),
+      )
+      setConversationId(id)
+    } catch (err) {
+      console.error('Failed to load conversation', err)
+    } finally {
+      setLoadingConversation(false)
+    }
+  }
 
   const handleSend = async () => {
     const trimmed = input.trim()
@@ -62,17 +117,26 @@ export default function ChatPage() {
     }, 100)
 
     try {
-      const resp = await askQuery(token, { question: trimmed, conversation_id: conversationId || undefined })
-      if (!conversationId && resp.conversation_id) {
-        setConversationId(resp.conversation_id)
+      const done = await askQueryStream(
+        token,
+        { question: trimmed, conversation_id: conversationId || undefined },
+        (delta) => {
+          setTurns((prev) =>
+            prev.map((t) => (t.id === newTurn.id ? { ...t, answer: t.answer + delta, status: 'streaming' } : t))
+          )
+        },
+      )
+      if (!conversationId && done.conversation_id) {
+        setConversationId(done.conversation_id)
       }
       setTurns((prev) =>
         prev.map((t) =>
           t.id === newTurn.id
-            ? { ...t, answer: resp.answer, sources: resp.sources, status: 'success', query_id: resp.query_id }
+            ? { ...t, sources: done.sources, status: 'success', query_id: done.query_id }
             : t
         )
       )
+      refreshConversations()
     } catch (err) {
       setTurns((prev) =>
         prev.map((t) =>
@@ -112,6 +176,48 @@ export default function ChatPage() {
   return (
     <div className="flex h-screen bg-slate-50">
       <Sidebar userEmail={user.email} token={token} />
+
+      <div className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">History</span>
+          <button
+            onClick={handleNewThread}
+            aria-label="New thread"
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          {conversations.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-slate-400">No conversations yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {conversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => handleSelectConversation(conv.id)}
+                  className={`block w-full rounded-lg px-3 py-2 text-left transition ${
+                    conv.id === conversationId ? 'bg-blue-50' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <p
+                    className={`truncate text-sm font-medium ${
+                      conv.id === conversationId ? 'text-blue-700' : 'text-slate-700'
+                    }`}
+                  >
+                    {conv.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {conv.message_count} {conv.message_count === 1 ? 'message' : 'messages'} ·{' '}
+                    {relativeDate(conv.created_at)}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Header */}
@@ -159,8 +265,8 @@ export default function ChatPage() {
                     <Clock className="h-3.5 w-3.5" />
                     Updated just now
                   </div>
-                  <button 
-                    onClick={() => { setTurns([]); setConversationId(null); }}
+                  <button
+                    onClick={handleNewThread}
                     className="flex items-center gap-1 font-medium hover:text-slate-700"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
@@ -204,14 +310,16 @@ export default function ChatPage() {
                           <div className="flex flex-1 flex-col">
                             <div className="mb-1 flex items-center gap-2">
                               <span className="text-sm font-semibold text-slate-900">DocIntel Assistant</span>
-                              <span className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
-                                <ShieldCheck className="h-3 w-3" />
-                                Direct Policy Citation
-                              </span>
+                              {turn.sources.length > 0 && (
+                                <span className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Direct Policy Citation
+                                </span>
+                              )}
                             </div>
 
                             <div className="rounded-2xl rounded-tl-none bg-slate-50 px-6 py-5 text-sm text-slate-800 shadow-sm">
-                              {turn.status === 'loading' ? (
+                              {turn.status === 'loading' && !turn.answer ? (
                                 <div className="flex items-center gap-2 text-slate-500">
                                   <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} />
                                   <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '150ms' }} />
@@ -253,43 +361,47 @@ export default function ChatPage() {
                                     </div>
                                   )}
 
-                                  <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4">
-                                    <div className="flex items-center gap-3">
-                                      <span className="text-xs font-medium text-slate-500">Was this accurate?</span>
-                                      <div className="flex items-center gap-1">
-                                        <button 
-                                          onClick={() => turn.query_id && handleFeedback(turn.id, turn.query_id, 'up')}
-                                          className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition ${
-                                            turn.feedback === 'up' 
-                                              ? 'bg-blue-100 text-blue-700' 
-                                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                          }`}
-                                        >
-                                          <ThumbsUp className="h-3 w-3" />
-                                          Yes
-                                        </button>
-                                        <button 
-                                          onClick={() => turn.query_id && handleFeedback(turn.id, turn.query_id, 'down')}
-                                          className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition ${
-                                            turn.feedback === 'down' 
-                                              ? 'bg-red-100 text-red-700' 
-                                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                          }`}
-                                        >
-                                          <ThumbsDown className="h-3 w-3" />
-                                          No
+                                  {turn.status === 'success' && (
+                                    <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4">
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-xs font-medium text-slate-500">Was this accurate?</span>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => turn.query_id && handleFeedback(turn.id, turn.query_id, 'up')}
+                                            className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition ${
+                                              turn.feedback === 'up'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            }`}
+                                          >
+                                            <ThumbsUp className="h-3 w-3" />
+                                            Yes
+                                          </button>
+                                          <button
+                                            onClick={() => turn.query_id && handleFeedback(turn.id, turn.query_id, 'down')}
+                                            className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition ${
+                                              turn.feedback === 'down'
+                                                ? 'bg-red-100 text-red-700'
+                                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            }`}
+                                          >
+                                            <ThumbsDown className="h-3 w-3" />
+                                            No
+                                          </button>
+                                        </div>
+                                        <button className="ml-2 flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">
+                                          <Copy className="h-3 w-3" />
+                                          Copy Answer
                                         </button>
                                       </div>
-                                      <button className="ml-2 flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">
-                                        <Copy className="h-3 w-3" />
-                                        Copy Answer
-                                      </button>
+                                      {turn.sources.length > 0 && (
+                                        <div className="flex items-center gap-1 text-xs font-medium text-slate-500">
+                                          <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
+                                          All citations verified against company-approved policies
+                                        </div>
+                                      )}
                                     </div>
-                                    <div className="flex items-center gap-1 text-xs font-medium text-slate-500">
-                                      <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
-                                      All citations verified against company-approved policies
-                                    </div>
-                                  </div>
+                                  )}
                                 </div>
                               )}
                             </div>
