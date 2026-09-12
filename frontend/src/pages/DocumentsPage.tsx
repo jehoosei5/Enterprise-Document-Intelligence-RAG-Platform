@@ -23,7 +23,7 @@ import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-rout
 
 import type { AuthOutletContext } from '../components/RequireAuth'
 import Sidebar from '../components/Sidebar'
-import { CATEGORIES } from '../lib/categories'
+
 import {
   deleteDocument,
   EDITABLE_FORMATS,
@@ -51,7 +51,7 @@ const FORMAT_META: Record<SourceFormat, { label: string; icon: typeof FileText; 
 const FORMAT_FILTERS: SourceFormat[] = ['pdf', 'docx', 'text', 'markdown', 'csv']
 
 // Distinct pastel per category so badges read at a glance in the grid,
-// matching each of the four fixed categories in lib/categories.ts.
+// matching some common categories, but fallback to a default styling.
 const CATEGORY_STYLES: Record<string, string> = {
   'HR Policy': 'bg-rose-50 text-rose-700',
   Benefits: 'bg-blue-50 text-blue-700',
@@ -338,7 +338,7 @@ export default function DocumentsPage() {
   }, [documents, formatFilter, search, sort])
 
   const visible = filtered.slice(0, visibleCount)
-  const heading = category ? CATEGORIES.find((c) => c.value === category)?.label ?? category : 'All Documents'
+  const heading = category ? category : 'All Documents'
 
   function goToUploadWithFile(file: File) {
     navigate('/documents/upload', { state: { droppedFile: file } })
@@ -391,7 +391,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="flex h-screen bg-slate-50">
-      <Sidebar userEmail={user.email} />
+      <Sidebar userEmail={user.email} token={token} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-4">

@@ -5,8 +5,10 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Download,
   Edit3,
   FileSpreadsheet,
@@ -27,11 +29,12 @@ import {
   X,
 } from 'lucide-react'
 import mammoth from 'mammoth'
+import Mark from 'mark.js'
 import MarkdownIt from 'markdown-it'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import pdfjsWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
@@ -107,6 +110,108 @@ function buildPreview(format: SourceFormat, text: string): Preview {
   return { kind: 'text', text }
 }
 
+/* ── Search Hook ───────────────────────────────────────────────── */
+
+export interface DocumentSearch {
+  query: string
+  setQuery: (q: string) => void
+  totalMatches: number
+  currentIndex: number
+  nextMatch: () => void
+  prevMatch: () => void
+}
+
+function useDocumentSearch(containerId: string): DocumentSearch {
+  const [query, setQuery] = useState('')
+  const [totalMatches, setTotalMatches] = useState(0)
+  const [currentIndex, setCurrentIndex] = useState(0)
+
+  const markInstanceRef = useRef<Mark | null>(null)
+  const queryRef = useRef(query)
+  queryRef.current = query
+
+  const scrollToMatch = useCallback(
+    (index: number) => {
+      const container = document.getElementById(containerId)
+      if (!container) return
+      const marks = container.querySelectorAll('mark.doc-search-match')
+
+      marks.forEach((m) => {
+        m.classList.remove('bg-orange-400', 'text-white')
+        m.classList.add('bg-yellow-300', 'text-black')
+      })
+
+      if (marks.length > 0 && index < marks.length && index >= 0) {
+        const activeMark = marks[index]
+        activeMark.classList.remove('bg-yellow-300', 'text-black')
+        activeMark.classList.add('bg-orange-400', 'text-white')
+        activeMark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setCurrentIndex(index)
+      }
+    },
+    [containerId]
+  )
+
+  const performSearch = useCallback(() => {
+    if (!markInstanceRef.current) {
+      const container = document.getElementById(containerId)
+      if (container) {
+        markInstanceRef.current = new Mark(container)
+      }
+    }
+
+    if (markInstanceRef.current) {
+      markInstanceRef.current.unmark({
+        done: () => {
+          if (!queryRef.current) {
+            setTotalMatches(0)
+            setCurrentIndex(0)
+            return
+          }
+          markInstanceRef.current?.mark(queryRef.current, {
+            acrossElements: true,
+            className: 'doc-search-match bg-yellow-300 text-black',
+            done: (count) => {
+              setTotalMatches(count)
+              setCurrentIndex((prev) => {
+                const nextIdx = prev >= count ? 0 : prev
+                setTimeout(() => scrollToMatch(nextIdx), 50)
+                return nextIdx
+              })
+            }
+          })
+        }
+      })
+    }
+  }, [containerId, scrollToMatch])
+
+  useEffect(() => {
+    performSearch()
+  }, [query, performSearch])
+
+  useEffect(() => {
+    const handler = () => {
+      if (queryRef.current) performSearch()
+    }
+    window.addEventListener('pdf-page-rendered', handler)
+    return () => window.removeEventListener('pdf-page-rendered', handler)
+  }, [performSearch])
+
+  const nextMatch = () => {
+    if (totalMatches > 0) {
+      scrollToMatch((currentIndex + 1) % totalMatches)
+    }
+  }
+
+  const prevMatch = () => {
+    if (totalMatches > 0) {
+      scrollToMatch((currentIndex - 1 + totalMatches) % totalMatches)
+    }
+  }
+
+  return { query, setQuery, totalMatches, currentIndex, nextMatch, prevMatch }
+}
+
 /* ── PDF Viewer ────────────────────────────────────────────────── */
 
 function PdfPageRenderer({
@@ -160,7 +265,69 @@ function PdfPageRenderer({
   )
 }
 
-function PdfViewer({ blob, documentTitle, onFullscreen }: { blob: Blob; documentTitle: string; onFullscreen: () => void }) {
+/* ── Search UI ─────────────────────────────────────────────────── */
+
+function ToolbarSearch({ search }: { search: DocumentSearch }) {
+  const { query, setQuery, totalMatches, currentIndex, nextMatch, prevMatch } = search
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+        <Search className="h-3.5 w-3.5 text-slate-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              nextMatch()
+            }
+          }}
+          placeholder="Find in document..."
+          className="w-36 bg-transparent text-xs text-slate-700 outline-none placeholder:text-slate-400"
+        />
+        {query && totalMatches > 0 && (
+          <span className="text-[10px] text-slate-400 whitespace-nowrap px-1">
+            {currentIndex + 1} of {totalMatches}
+          </span>
+        )}
+        {query && totalMatches === 0 && (
+          <span className="text-[10px] text-slate-400 whitespace-nowrap px-1">0 of 0</span>
+        )}
+      </div>
+
+      <div className="flex items-center rounded-lg border border-slate-200 bg-white">
+        <button
+          type="button"
+          onClick={prevMatch}
+          disabled={!query || totalMatches === 0}
+          className="p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <ChevronUp className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={nextMatch}
+          disabled={!query || totalMatches === 0}
+          className="border-l border-slate-200 p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PdfViewer({
+  blob,
+  documentTitle,
+  onFullscreen,
+}: {
+  blob: Blob
+  documentTitle: string
+  onFullscreen: () => void
+}) {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [scale, setScale] = useState(1.0)
@@ -276,7 +443,7 @@ function PdfViewer({ blob, documentTitle, onFullscreen }: { blob: Blob; document
         </button>
       </div>
       {/* Scrollable pages */}
-      <div ref={containerRef} className="flex-1 overflow-auto bg-slate-100 p-6">
+      <div id="document-content-area" ref={containerRef} className="flex-1 overflow-auto bg-slate-100 p-6">
         <div className="mx-auto flex max-w-4xl flex-col items-center gap-6 pb-20">
           {pdfDoc && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
             <PdfPageRenderer
@@ -301,12 +468,14 @@ function PreviewToolbar({
   canEdit,
   onEdit,
   onFullscreen,
+  search,
 }: {
   format: SourceFormat
   rowCount?: number
   canEdit: boolean
   onEdit: () => void
   onFullscreen: () => void
+  search: DocumentSearch
 }) {
   return (
     <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
@@ -324,6 +493,10 @@ function PreviewToolbar({
       )}
 
       <div className="flex-1" />
+
+      <ToolbarSearch search={search} />
+
+      <span className="mx-1 h-4 w-px bg-slate-300" />
 
       {canEdit && (
         <button
@@ -581,6 +754,8 @@ export default function DocumentViewerPage() {
   const autoEdit = (location.state as { autoEdit?: boolean } | null)?.autoEdit ?? false
   const autoEditTriggered = useRef(false)
 
+  const search = useDocumentSearch('document-content-area')
+
   const [doc, setDoc] = useState<DocumentOut | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [rawText, setRawText] = useState<string | null>(null)
@@ -735,7 +910,7 @@ export default function DocumentViewerPage() {
 
   return (
     <div className="flex h-screen bg-slate-50">
-      <Sidebar userEmail={user.email} />
+      <Sidebar userEmail={user.email} token={token} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* ── Header ──────────────────────────────────────────── */}
@@ -956,17 +1131,18 @@ export default function DocumentViewerPage() {
                         canEdit={!!canEditContent && !editingContent}
                         onEdit={startEditingContent}
                         onFullscreen={toggleFullscreen}
+                        search={search}
                       />
                     )}
 
                     {preview?.kind === 'text' && (
-                      <pre className="flex-1 overflow-auto whitespace-pre-wrap px-6 py-6 text-sm leading-relaxed text-slate-700">
+                      <pre id="document-content-area" className="flex-1 overflow-auto whitespace-pre-wrap px-6 py-6 text-sm leading-relaxed text-slate-700">
                         {preview.text}
                       </pre>
                     )}
 
                     {preview?.kind === 'csv' && (
-                      <div className="flex-1 overflow-auto">
+                      <div id="document-content-area" className="flex-1 overflow-auto">
                         <table className="w-full border-collapse text-sm">
                           <thead className="sticky top-0 bg-slate-50">
                             <tr>
@@ -997,7 +1173,8 @@ export default function DocumentViewerPage() {
 
                     {preview?.kind === 'html' && (
                       <div
-                        className="doc-preview flex-1 overflow-auto px-8 py-6"
+                        id="document-content-area"
+                        className="prose prose-slate max-w-none flex-1 overflow-auto px-8 py-6"
                         dangerouslySetInnerHTML={{ __html: preview.html }}
                       />
                     )}

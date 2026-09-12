@@ -10,9 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.20",
+    "@types/mark.js": "^8.11.12",
     "dompurify": "^3.4.15",
     "lucide-react": "^1.44.0",
     "mammoth": "^1.12.2",
+    "mark.js": "^8.11.1",
     "markdown-it": "^15.0.2",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.2.8",

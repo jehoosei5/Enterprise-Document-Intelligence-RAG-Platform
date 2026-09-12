@@ -1,7 +1,7 @@
 import { FileText, MessageSquare, User as UserIcon } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 
-import { CATEGORIES } from '../lib/categories'
+import { useCategories } from '../lib/categories'
 
 function navLinkClasses(active: boolean) {
   return `block rounded-lg px-3 py-2 text-sm font-medium ${
@@ -9,9 +9,10 @@ function navLinkClasses(active: boolean) {
   }`
 }
 
-export default function Sidebar({ userEmail }: { userEmail: string }) {
+export default function Sidebar({ userEmail, token }: { userEmail: string; token: string }) {
   const [searchParams] = useSearchParams()
   const activeCategory = searchParams.get('category')
+  const { categories } = useCategories(token)
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r border-slate-200 bg-white">
@@ -29,13 +30,13 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
           All Documents
         </NavLink>
 
-        {CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <NavLink
-            key={cat.value}
-            to={`/documents?category=${encodeURIComponent(cat.value)}`}
-            className={navLinkClasses(activeCategory === cat.value)}
+            key={cat}
+            to={`/documents?category=${encodeURIComponent(cat)}`}
+            className={navLinkClasses(activeCategory === cat)}
           >
-            {cat.label}
+            {cat}
           </NavLink>
         ))}
 
