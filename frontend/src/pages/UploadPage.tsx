@@ -16,7 +16,11 @@ import { useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import type { AuthOutletContext } from '../components/RequireAuth'
 import { ApiError } from '../lib/api'
 import { useCategories } from '../lib/categories'
-import { uploadDocument } from '../lib/documents'
+import {
+  uploadDocument,
+  DuplicateConflictError,
+  type DuplicateConflictDetail,
+} from '../lib/documents'
 
 function stripExtension(filename: string): string {
   const idx = filename.lastIndexOf('.')
@@ -45,6 +49,10 @@ export default function UploadPage() {
   const [isPublic, setIsPublic] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const [conflict, setConflict] = useState<DuplicateConflictDetail | null>(null)
+  const [renameTo, setRenameTo] = useState('')
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { categories } = useCategories(token)
 
@@ -52,6 +60,8 @@ export default function UploadPage() {
     setFile(f)
     setTitle(stripExtension(f.name))
     setError(null)
+    setConflict(null)
+    setRenameTo('')
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -61,16 +71,29 @@ export default function UploadPage() {
     if (dropped) selectFile(dropped)
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmDifferentType = false) {
     if (!file || !title.trim()) return
     const effectiveCategory = category.trim() || null
     setLoading(true)
     setError(null)
     try {
-      await uploadDocument(token, { file, title: title.trim(), category: effectiveCategory, isPublic })
+      await uploadDocument(token, {
+        file,
+        title: title.trim(),
+        category: effectiveCategory,
+        isPublic,
+        confirmDifferentType,
+        renameTo: renameTo.trim() || undefined,
+      })
       navigate('/documents')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Upload failed. Please try again.')
+      if (err instanceof DuplicateConflictError) {
+        setConflict(err.detail)
+        setRenameTo(title.trim())
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Upload failed. Please try again.')
+      }
+    } finally {
       setLoading(false)
     }
   }
@@ -164,7 +187,7 @@ export default function UploadPage() {
             </div>
           )}
 
-          {file && (
+          {file && !conflict && (
             <div className="mt-6 space-y-6">
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
@@ -274,12 +297,92 @@ export default function UploadPage() {
                   <button
                     type="button"
                     disabled={loading || !title.trim() || !category.trim()}
-                    onClick={handleSubmit}
+                    onClick={() => handleSubmit(false)}
                     className="flex items-center gap-2 rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:opacity-60"
                   >
                     {loading ? 'Uploading…' : 'Done'}
                     {!loading && <ArrowRight className="h-4 w-4" />}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {file && conflict && (
+            <div className="mt-6 space-y-6 animate-in fade-in slide-in-from-bottom-2">
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                <div className="flex items-start gap-3">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 text-amber-600" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-amber-900">Duplicate Document Detected</h3>
+                    <p className="mt-1 text-sm text-amber-700">{conflict.message}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-slate-700">Existing Document(s):</p>
+                {conflict.existing_documents.map(d => (
+                  <div key={d.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 bg-slate-50">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{d.title}</p>
+                      <p className="text-xs text-slate-500">{d.filename}</p>
+                    </div>
+                    <span className="rounded bg-slate-200 px-2 py-1 text-xs font-semibold uppercase text-slate-600">
+                      {d.source_format}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {error && <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+              {conflict.actions.includes('rename') && (
+                <div>
+                  <label htmlFor="rename" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Rename this upload
+                  </label>
+                  <input
+                    id="rename"
+                    value={renameTo}
+                    onChange={(e) => setRenameTo(e.target.value)}
+                    className="w-full rounded-lg bg-slate-100 px-3.5 py-2.5 text-sm text-slate-900 outline-none ring-blue-500 focus:ring-2"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t border-slate-100 pt-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConflict(null)
+                    setRenameTo(title)
+                  }}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <div className="flex items-center gap-3">
+                  {conflict.actions.includes('accept') && (
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => handleSubmit(true)}
+                      className="rounded-lg bg-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60"
+                    >
+                      {loading ? 'Uploading…' : 'Upload Anyway'}
+                    </button>
+                  )}
+                  {conflict.actions.includes('rename') && (
+                    <button
+                      type="button"
+                      disabled={loading || !renameTo.trim() || renameTo.trim() === title.trim()}
+                      onClick={() => handleSubmit(false)}
+                      className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:opacity-60"
+                    >
+                      {loading ? 'Renaming…' : 'Rename & Retry'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

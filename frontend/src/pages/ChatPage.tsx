@@ -10,6 +10,8 @@ import {
   Sparkles,
   ThumbsDown,
   ThumbsUp,
+  History,
+  X,
   User as UserIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -49,7 +51,8 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loadingConversation, setLoadingConversation] = useState(false)
-
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const refreshConversations = async () => {
@@ -176,49 +179,6 @@ export default function ChatPage() {
   return (
     <div className="flex h-screen bg-slate-50">
       <Sidebar userEmail={user.email} token={token} />
-
-      <div className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">History</span>
-          <button
-            onClick={handleNewThread}
-            aria-label="New thread"
-            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {conversations.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-slate-400">No conversations yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {conversations.map((conv) => (
-                <button
-                  key={conv.id}
-                  onClick={() => handleSelectConversation(conv.id)}
-                  className={`block w-full rounded-lg px-3 py-2 text-left transition ${
-                    conv.id === conversationId ? 'bg-blue-50' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <p
-                    className={`truncate text-sm font-medium ${
-                      conv.id === conversationId ? 'text-blue-700' : 'text-slate-700'
-                    }`}
-                  >
-                    {conv.title}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    {conv.message_count} {conv.message_count === 1 ? 'message' : 'messages'} ·{' '}
-                    {relativeDate(conv.created_at)}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Header */}
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-8">
@@ -231,10 +191,10 @@ export default function ChatPage() {
         </header>
 
         {/* Main Content Scroll Area */}
-        <div className="flex-1 overflow-y-auto px-8 py-8">
-          <div className="mx-auto max-w-4xl">
+        <div className="flex-1 flex flex-col overflow-hidden px-8 py-8">
+          <div className="mx-auto max-w-6xl w-full flex flex-col flex-1 min-h-0">
             {/* Title Area */}
-            <div className="mb-6 flex items-start justify-between">
+            <div className="mb-6 flex items-start justify-between shrink-0">
               <div>
                 <div className="flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-500">
                   <div className="h-2 w-2 rounded-full bg-blue-600" />
@@ -245,12 +205,26 @@ export default function ChatPage() {
                   Instant answers verified against company policies, compliance filings, and employee manuals.
                 </p>
               </div>
+              <button 
+                onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium shadow-sm transition-colors ${
+                  isHistoryOpen 
+                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <History className="h-4 w-4" />
+                Chat History
+              </button>
             </div>
 
-            {/* Chat Thread Container */}
-            <div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              {/* Thread Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
+            <div className="flex gap-6 items-start flex-1 min-h-0">
+              {/* Left Side: Chat Area */}
+              <div className="flex flex-1 min-w-0 flex-col h-full">
+                {/* Chat Thread Container */}
+                <div className="flex flex-col flex-1 min-h-0 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  {/* Thread Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                     <ShieldCheck className="h-4 w-4 text-blue-600" />
@@ -276,7 +250,7 @@ export default function ChatPage() {
               </div>
 
               {/* Thread Messages */}
-              <div className="flex flex-col p-6">
+              <div className="flex flex-col p-6 flex-1 overflow-y-auto">
                 {turns.length === 0 ? (
                   <div className="flex h-40 flex-col items-center justify-center text-slate-400">
                     <Sparkles className="mb-2 h-8 w-8 text-slate-300" />
@@ -416,7 +390,7 @@ export default function ChatPage() {
             </div>
 
             {/* Input Area */}
-            <div className="mt-6">
+            <div className="mt-6 shrink-0">
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-2 rounded-full bg-blue-600" />
@@ -451,6 +425,65 @@ export default function ChatPage() {
                   <ArrowUp className="h-5 w-5" />
                 </button>
               </div>
+            </div>
+              </div>
+
+              {/* Right Side: History Panel */}
+              {isHistoryOpen && (
+                <div className="w-80 shrink-0 flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden h-full">
+                  <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <History className="h-4 w-4 text-slate-500" />
+                      Recent Chats
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleNewThread}
+                        title="New Chat"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button 
+                        onClick={() => setIsHistoryOpen(false)}
+                        title="Close History"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2">
+                    {conversations.length === 0 ? (
+                      <p className="px-2 py-4 text-center text-xs text-slate-400">No conversations yet.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {conversations.map((conv) => (
+                          <button
+                            key={conv.id}
+                            onClick={() => handleSelectConversation(conv.id)}
+                            className={`block w-full rounded-lg px-3 py-2 text-left transition ${
+                              conv.id === conversationId ? 'bg-blue-50' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <p
+                              className={`truncate text-sm font-medium ${
+                                conv.id === conversationId ? 'text-blue-700' : 'text-slate-700'
+                              }`}
+                            >
+                              {conv.title}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-400">
+                              {conv.message_count} {conv.message_count === 1 ? 'message' : 'messages'} ·{' '}
+                              {relativeDate(conv.created_at)}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

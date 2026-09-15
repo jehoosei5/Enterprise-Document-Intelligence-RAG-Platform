@@ -24,6 +24,29 @@ export interface DocumentOut {
   updated_at: string
 }
 
+export interface DuplicateConflictDetail {
+  code: 'duplicate_exact' | 'duplicate_name_different_type'
+  message: string
+  incoming_filename: string
+  incoming_format: SourceFormat
+  existing_documents: {
+    id: string
+    filename: string
+    title: string
+    source_format: SourceFormat
+  }[]
+  actions: ('accept' | 'rename')[]
+}
+
+export class DuplicateConflictError extends Error {
+  detail: DuplicateConflictDetail
+  constructor(detail: DuplicateConflictDetail) {
+    super(detail.message)
+    this.name = 'DuplicateConflictError'
+    this.detail = detail
+  }
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -102,19 +125,36 @@ export async function updateDocumentContent(
 
 export async function uploadDocument(
   token: string,
-  params: { file: File; title: string; category: string | null; isPublic: boolean },
+  params: { 
+    file: File
+    title: string
+    category: string | null
+    isPublic: boolean
+    confirmDifferentType?: boolean
+    renameTo?: string
+  },
 ): Promise<DocumentOut> {
   const formData = new FormData()
   formData.append('file', params.file)
   formData.append('title', params.title)
   if (params.category) formData.append('category', params.category)
   formData.append('is_public', String(params.isPublic))
+  if (params.confirmDifferentType) formData.append('confirm_different_type', 'true')
+  if (params.renameTo) formData.append('rename_to', params.renameTo)
 
   const res = await fetch(`${API_BASE_URL}/documents`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
   })
+  
+  if (res.status === 409) {
+    const data = await res.json().catch(() => null)
+    if (data?.detail?.code) {
+      throw new DuplicateConflictError(data.detail)
+    }
+  }
+  
   if (!res.ok) return parseErrorOrThrow(res)
   return res.json()
 }

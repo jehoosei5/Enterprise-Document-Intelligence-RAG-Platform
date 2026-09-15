@@ -170,6 +170,7 @@ function useDocumentSearch(containerId: string): DocumentSearch {
           }
           markInstanceRef.current?.mark(queryRef.current, {
             acrossElements: true,
+            separateWordSearch: false,
             className: 'doc-search-match bg-yellow-300 text-black',
             done: (count) => {
               setTotalMatches(count)
