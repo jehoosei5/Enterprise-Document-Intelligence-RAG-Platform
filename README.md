@@ -173,7 +173,7 @@ All endpoints except `/health`, `/auth/register`, `/auth/login`,
 | `POST /auth/forgot-password` | `{"email": ...}` — always returns the same generic response (never reveals whether the account exists); emails a reset link when it does and has a password set (no auth) |
 | `POST /auth/reset-password` | `{"token": ..., "new_password": ...}` — sets a new password if the token is valid and unexpired (no auth) |
 | `GET /auth/me` | Current user's profile |
-| `POST /documents` | Upload a file (`multipart/form-data`: `file`, `title`, optional `category`, `is_public`) — parses, chunks, embeds (dense + sparse), indexes, stores the original file in R2, and returns the document record. Caller becomes the owner |
+| `POST /documents` | Upload a file (`multipart/form-data`: `file`, `title`, optional `category`, `is_public`, optional `confirm_different_type`, optional `rename_to`) — parses, chunks, embeds (dense + sparse), indexes, stores the original file in R2, and returns the document record. Caller becomes the owner. Duplicate check (owner-scoped, case-insensitive stem): same name + same type → **409** `duplicate_exact` (must rename); same name + different type → **409** `duplicate_name_different_type` unless retried with `confirm_different_type=true` (accept) or `rename_to=...` |
 | `GET /documents` | List documents the caller owns, has been shared, or that are marked public (optionally filtered by `category`) |
 | `GET /documents/{id}` | Get one document's status (404 if inaccessible) |
 | `GET /documents/{id}/file` | Stream the original uploaded file back from R2 (404 if inaccessible or missing from storage) |
