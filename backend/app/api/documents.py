@@ -23,6 +23,8 @@ from app.schemas.documents import (
     DocumentOut,
     DocumentUpdateRequest,
     DocumentUploadResponse,
+    DuplicateConflictDetail,
+    DuplicateConflictDocument,
     ShareRequest,
 )
 from app.schemas.queries import QueryLogSummary
@@ -32,6 +34,110 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 # Formats whose "content" is just text we already fetch/render as such —
 # the only ones content-editing supports (see PUT .../content below).
 _TEXT_BACKED_FORMATS = {SourceFormat.TEXT, SourceFormat.MARKDOWN, SourceFormat.CSV}
+
+
+def _filename_stem(filename: str) -> str:
+    """Name without extension — 'Report.PDF' and 'report.docx' share stem 'report'."""
+    return Path(filename).stem
+
+
+def _resolve_upload_filename(original_filename: str, rename_to: str | None, ext: str) -> str:
+    """Apply an optional rename. Keeps the uploaded file's real extension so
+    type can't be laundered via rename_to; strips any extension the client
+    included in rename_to.
+    """
+    if rename_to is None or not rename_to.strip():
+        return original_filename
+
+    name = Path(rename_to.strip()).name  # drop any path segments
+    # pathlib treats ".pdf" as a hidden name with no suffix — strip a
+    # leading-dot-only "extension" the same way as a normal one.
+    suffix = Path(name).suffix.lower()
+    if suffix in SUPPORTED_EXTENSIONS:
+        name = Path(name).stem
+    elif name.lower() in {e for e in SUPPORTED_EXTENSIONS}:
+        # rename_to was just ".pdf" / ".docx" / etc.
+        name = ""
+    if not name.strip() or name.strip() in {".", ".."}:
+        raise HTTPException(status_code=400, detail="rename_to cannot be empty")
+    return f"{name.strip()}{ext}"
+
+
+def _owned_docs_with_stem(db: Session, owner_id: str, stem: str) -> list[Document]:
+    """Owner-scoped, case-insensitive stem match against existing filenames."""
+    stem_lower = stem.lower()
+    owned = db.query(Document).filter(Document.owner_id == owner_id).all()
+    return [d for d in owned if _filename_stem(d.filename).lower() == stem_lower]
+
+
+def classify_filename_conflict(
+    conflicts: list[Document],
+    source_format: SourceFormat,
+    confirm_different_type: bool,
+) -> tuple[str, list[Document]] | None:
+    """Return (conflict_code, matching_docs) or None if upload may proceed.
+
+    Same stem + same format → always blocked (`duplicate_exact`).
+    Same stem + different format → blocked unless confirm_different_type.
+    """
+    if not conflicts:
+        return None
+
+    same_type = [d for d in conflicts if d.source_format == source_format]
+    if same_type:
+        return ("duplicate_exact", same_type)
+
+    diff_type = [d for d in conflicts if d.source_format != source_format]
+    if diff_type and not confirm_different_type:
+        return ("duplicate_name_different_type", diff_type)
+
+    return None
+
+
+def _raise_if_duplicate_filename(
+    *,
+    db: Session,
+    owner_id: str,
+    filename: str,
+    source_format: SourceFormat,
+    confirm_different_type: bool,
+) -> None:
+    """Enforce upload naming rules against the caller's own documents."""
+    conflicts = _owned_docs_with_stem(db, owner_id, _filename_stem(filename))
+    classified = classify_filename_conflict(conflicts, source_format, confirm_different_type)
+    if classified is None:
+        return
+
+    code, docs = classified
+    existing = docs[0]
+
+    if code == "duplicate_exact":
+        detail = DuplicateConflictDetail(
+            code="duplicate_exact",
+            message=(
+                f"A document named '{existing.filename}' already exists. "
+                "Rename the file to upload it."
+            ),
+            incoming_filename=filename,
+            incoming_format=source_format,
+            existing_documents=[DuplicateConflictDocument.model_validate(d) for d in docs],
+            actions=["rename"],
+        )
+    else:
+        detail = DuplicateConflictDetail(
+            code="duplicate_name_different_type",
+            message=(
+                f"A document named '{_filename_stem(existing.filename)}' already exists "
+                f"as {existing.source_format.value} ({existing.filename}). "
+                f"Accept uploading as {source_format.value}, or rename."
+            ),
+            incoming_filename=filename,
+            incoming_format=source_format,
+            existing_documents=[DuplicateConflictDocument.model_validate(d) for d in docs],
+            actions=["accept", "rename"],
+        )
+
+    raise HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
 
 
 def _ingest_and_index(document: Document, dest_path: Path, settings: Settings) -> None:
@@ -71,18 +177,36 @@ def upload_document(
     title: str = Form(...),
     category: str | None = Form(None),
     is_public: bool = Form(False),
+    # Same stem + different type: retry with true after the UI prompt, or
+    # pass rename_to instead. Same stem + same type is always blocked.
+    confirm_different_type: bool = Form(False),
+    rename_to: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Document:
     settings = get_settings()
-    ext = Path(file.filename or "").suffix.lower()
+    original_name = file.filename or ""
+    ext = Path(original_name).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type '{ext}'. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
         )
 
+    source_format = _source_format_for_ext(ext)
     doc_id = str(uuid.uuid4())
+    filename = _resolve_upload_filename(
+        original_name or f"{doc_id}{ext}",
+        rename_to,
+        ext,
+    )
+    _raise_if_duplicate_filename(
+        db=db,
+        owner_id=current_user.id,
+        filename=filename,
+        source_format=source_format,
+        confirm_different_type=confirm_different_type,
+    )
 
     # Parsing needs a real local file path (every parser in app/ingestion/
     # takes file_path: str, none accept bytes) — write to a temp file for
@@ -96,11 +220,11 @@ def upload_document(
         document = Document(
             id=doc_id,
             owner_id=current_user.id,
-            filename=file.filename or f"{doc_id}{ext}",
-            title=title.strip() or (file.filename or f"{doc_id}{ext}"),
+            filename=filename,
+            title=title.strip() or filename,
             category=category,
             is_public=is_public,
-            source_format=_source_format_for_ext(ext),
+            source_format=source_format,
             size_bytes=tmp_path.stat().st_size,
             status=DocumentStatus.PROCESSING,
         )
