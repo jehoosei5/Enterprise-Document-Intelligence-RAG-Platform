@@ -1,5 +1,5 @@
 import { FileText, MessageSquare, User as UserIcon } from 'lucide-react'
-import { NavLink, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, useSearchParams } from 'react-router-dom'
 
 import { useCategories } from '../lib/categories'
 
@@ -51,12 +51,12 @@ export default function Sidebar({ userEmail, token }: { userEmail: string; token
 
       </nav>
 
-      <div className="flex items-center gap-2 border-t border-slate-200 px-4 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white">
+      <Link to="/profile" className="flex items-center gap-2 border-t border-slate-200 px-4 py-4 transition hover:bg-slate-50">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
           <UserIcon className="h-4 w-4" />
         </div>
         <span className="truncate text-sm font-medium text-slate-700">{userEmail}</span>
-      </div>
+      </Link>
     </aside>
   )
 }
