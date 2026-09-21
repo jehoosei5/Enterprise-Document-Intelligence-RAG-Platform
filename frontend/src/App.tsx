@@ -7,6 +7,8 @@ import LoginPage from './pages/LoginPage'
 import UploadPage from './pages/UploadPage'
 import ChatPage from './pages/ChatPage'
 
+import ProfilePage from './pages/ProfilePage'
+
 function App() {
   return (
     <Routes>
@@ -17,6 +19,7 @@ function App() {
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/documents/upload" element={<UploadPage />} />
         <Route path="/documents/:id" element={<DocumentViewerPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/chat" replace />} />
