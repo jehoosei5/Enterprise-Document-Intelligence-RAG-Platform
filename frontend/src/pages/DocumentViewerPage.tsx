@@ -38,6 +38,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 
 import type { AuthOutletContext } from '../components/RequireAuth'
+import MarkdownAnswer from '../components/MarkdownAnswer'
 import Sidebar from '../components/Sidebar'
 import { parseCsv } from '../lib/csv'
 import {
@@ -51,7 +52,7 @@ import {
   type DocumentOut,
   type SourceFormat,
 } from '../lib/documents'
-import { askQueryStream, getDocumentQuestions, type QueryLogSummary, type SourceOut } from '../lib/query'
+import { askQueryStream, getDocumentQuestions, getQueryDetails, type QueryLogSummary, type SourceOut } from '../lib/query'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
 
@@ -583,6 +584,24 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
     }
   }
 
+  /** Show a previously asked Q&A from history — no LLM call. */
+  async function showPastQuestion(q: QueryLogSummary) {
+    setChatError(null)
+    try {
+      const detail = await getQueryDetails(token, q.id)
+      setTurns([
+        {
+          question: q.question,
+          answer: detail.answer ?? q.answer,
+          sources: detail.sources ?? [],
+        },
+      ])
+    } catch {
+      // Summary already has question/answer; sources are optional.
+      setTurns([{ question: q.question, answer: q.answer, sources: [] }])
+    }
+  }
+
 
   return (
     <div className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -604,7 +623,7 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
             <button
               key={q.id}
               type="button"
-              onClick={() => ask(q.question)}
+              onClick={() => showPastQuestion(q)}
               className="group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-slate-50"
             >
               <div className="min-w-0 flex-1">
@@ -633,9 +652,14 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
           {turns.map((t, i) => (
             <div key={i}>
               <p className="text-xs font-semibold text-slate-700">{t.question}</p>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-600 whitespace-pre-wrap">
-                {t.answer || (asking && i === turns.length - 1 ? 'Thinking…' : '')}
-              </p>
+              {t.answer ? (
+                <MarkdownAnswer
+                  content={t.answer}
+                  className="prose prose-sm prose-slate mt-1.5 max-w-none text-xs leading-relaxed text-slate-600 prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-strong:text-slate-800"
+                />
+              ) : asking && i === turns.length - 1 ? (
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">Thinking…</p>
+              ) : null}
               {t.sources.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {t.sources.map((s) => (

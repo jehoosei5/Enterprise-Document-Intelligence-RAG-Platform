@@ -16,6 +16,7 @@ function App() {
 
       <Route element={<RequireAuth />}>
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/documents/upload" element={<UploadPage />} />
         <Route path="/documents/:id" element={<DocumentViewerPage />} />
