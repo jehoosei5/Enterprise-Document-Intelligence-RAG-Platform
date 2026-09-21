@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_accessible_doc_ids, get_current_user
 from app.core.config import get_settings
+from app.core.query_file_log import append_query_log
 from app.db.models import Conversation, QueryLog, User
 from app.db.session import SessionLocal, get_db
 from app.embeddings.azure_embeddings import embed_text
@@ -77,6 +78,15 @@ def _get_history(conversation: Conversation, db: Session, settings) -> list[dict
     )
     rows.reverse()  # oldest first, for the rewrite prompt
     return [{"question": r.question, "answer": r.answer} for r in rows]
+
+
+def _save_query_log(db: Session, log: QueryLog) -> QueryLog:
+    """Persist to MySQL and mirror to the local .txt query log."""
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    append_query_log(log)
+    return log
 
 
 def _generate_and_save_conversation_title(conversation_id: str, question: str, answer: str) -> None:
@@ -200,9 +210,7 @@ def query(
             scoped_document_id=request.document_id,
             latency_total_ms=int((time.perf_counter() - total_start) * 1000),
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             background_tasks.add_task(
                 _generate_and_save_conversation_title, conversation.id, request.question, log.answer
@@ -242,9 +250,7 @@ def query(
             latency_llm_ms=latency_llm_ms,
             latency_total_ms=latency_total_ms,
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             background_tasks.add_task(
                 _generate_and_save_conversation_title, conversation.id, request.question, chat_result.answer
@@ -305,9 +311,7 @@ def query(
         latency_eval_ms=latency_eval_ms,
         latency_total_ms=latency_total_ms,
     )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
+    _save_query_log(db, log)
 
     if is_new_conversation:
         background_tasks.add_task(
@@ -351,9 +355,7 @@ def query_stream(
                 model=settings.azure_openai_chat_deployment,
                 latency_total_ms=int((time.perf_counter() - total_start) * 1000),
             )
-            db.add(log)
-            db.commit()
-            db.refresh(log)
+            _save_query_log(db, log)
             if is_new_conversation:
                 _generate_and_save_conversation_title(conversation.id, request.question, answer)
             yield f"data: {json.dumps({'delta': answer})}\n\n"
@@ -385,9 +387,7 @@ def query_stream(
                 latency_llm_ms=latency_llm_ms,
                 latency_total_ms=latency_total_ms,
             )
-            db.add(log)
-            db.commit()
-            db.refresh(log)
+            _save_query_log(db, log)
             if is_new_conversation:
                 _generate_and_save_conversation_title(conversation.id, request.question, full_text)
 
@@ -451,9 +451,7 @@ def query_stream(
             latency_eval_ms=latency_eval_ms,
             latency_total_ms=latency_total_ms,
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             _generate_and_save_conversation_title(conversation.id, request.question, full_text)
 

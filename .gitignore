@@ -19,6 +19,7 @@ frontend/.vite/
 # Uploaded documents / local data
 backend/data/uploads/
 backend/data/ocr_tmp/
+backend/data/query_logs.txt
 
 # Docker / DB
 pgdata/
