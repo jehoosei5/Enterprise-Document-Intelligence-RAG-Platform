@@ -51,7 +51,7 @@ import {
   type DocumentOut,
   type SourceFormat,
 } from '../lib/documents'
-import { askQuery, getDocumentQuestions, type QueryLogSummary, type SourceOut } from '../lib/query'
+import { askQueryStream, getDocumentQuestions, type QueryLogSummary, type SourceOut } from '../lib/query'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
 
@@ -549,13 +549,34 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
     setAsking(true)
     setChatError(null)
     setQuestion('')
+    // Seed an empty turn so tokens can append as the SSE stream arrives.
+    setTurns((t) => [...t, { question: trimmed, answer: '', sources: [] }])
     try {
-      const res = await askQuery(token, { question: trimmed, document_id: documentId })
-      setTurns((t) => [...t, { question: trimmed, answer: res.answer, sources: res.sources }])
+      const done = await askQueryStream(
+        token,
+        { question: trimmed, document_id: documentId },
+        (delta) => {
+          setTurns((prev) => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (!last || last.question !== trimmed) return prev
+            next[next.length - 1] = { ...last, answer: last.answer + delta }
+            return next
+          })
+        },
+      )
+      setTurns((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (!last || last.question !== trimmed) return prev
+        next[next.length - 1] = { ...last, sources: done.sources }
+        return next
+      })
       getDocumentQuestions(token, documentId)
         .then(setRecentQuestions)
         .catch(() => {})
     } catch (err) {
+      setTurns((prev) => prev.filter((t) => !(t.question === trimmed && !t.answer)))
       setChatError(err instanceof Error ? err.message : 'Failed to get an answer.')
     } finally {
       setAsking(false)
@@ -612,7 +633,9 @@ function ChatPanel({ documentId, token }: { documentId: string; token: string })
           {turns.map((t, i) => (
             <div key={i}>
               <p className="text-xs font-semibold text-slate-700">{t.question}</p>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{t.answer}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-600 whitespace-pre-wrap">
+                {t.answer || (asking && i === turns.length - 1 ? 'Thinking…' : '')}
+              </p>
               {t.sources.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {t.sources.map((s) => (

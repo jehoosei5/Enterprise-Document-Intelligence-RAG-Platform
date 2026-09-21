@@ -46,7 +46,7 @@ export async function askQuery(
       question: params.question,
       document_id: params.document_id ?? null,
       conversation_id: params.conversation_id ?? null,
-      evaluate: params.evaluate ?? false,
+      evaluate: params.evaluate ?? true,
     }),
   })
   if (!res.ok) return parseErrorOrThrow(res)
@@ -80,7 +80,7 @@ export async function askQueryStream(
       question: params.question,
       document_id: params.document_id ?? null,
       conversation_id: params.conversation_id ?? null,
-      evaluate: params.evaluate ?? false,
+      evaluate: params.evaluate ?? true,
     }),
   })
   if (!res.ok || !res.body) return parseErrorOrThrow(res)
