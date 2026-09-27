@@ -14,7 +14,6 @@ from app.core.config import Settings, get_settings
 from app.db.models import Document, DocumentShare, DocumentStatus, QueryLog, SourceFormat, User
 from app.db.session import get_db
 from app.embeddings.azure_embeddings import embed_texts
-from app.embeddings.sparse_embeddings import embed_texts as sparse_embed_texts
 from app.ingestion.dispatch import SUPPORTED_EXTENSIONS, UnsupportedFileTypeError, parse_document
 from app.retrieval.qdrant_store import delete_document as delete_document_vectors
 from app.retrieval.qdrant_store import upsert_chunks
@@ -155,8 +154,7 @@ def _ingest_and_index(document: Document, dest_path: Path, settings: Settings) -
         )
         texts = [c.text for c in chunks]
         dense_vectors = embed_texts(texts)
-        sparse_vectors = sparse_embed_texts(texts)
-        upsert_chunks(chunks, dense_vectors, sparse_vectors)
+        upsert_chunks(chunks, dense_vectors)
 
         document.page_count = ingested.page_count
         document.ocr_used = ingested.ocr_used

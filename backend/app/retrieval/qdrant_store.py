@@ -23,7 +23,11 @@ from app.embeddings.azure_embeddings import get_embedding_dimension
 @lru_cache
 def get_client() -> QdrantClient:
     settings = get_settings()
-    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    return QdrantClient(
+        url=settings.qdrant_url, 
+        api_key=settings.qdrant_api_key,
+        cloud_inference=True,
+    )
 
 
 def ensure_collection() -> None:
@@ -103,7 +107,6 @@ def _chunk_payload(chunk: Chunk) -> dict:
 def upsert_chunks(
     chunks: list[Chunk],
     dense_vectors: list[list[float]],
-    sparse_vectors: list[qmodels.SparseVector],
 ) -> None:
     settings = get_settings()
     client = get_client()
@@ -111,10 +114,13 @@ def upsert_chunks(
     points = [
         qmodels.PointStruct(
             id=str(uuid.uuid4()),
-            vector={"dense": dense, "sparse": sparse},
+            vector={
+                "dense": dense,
+                "sparse": qmodels.Document(text=chunk.text, model="qdrant/bm25"),
+            },
             payload=_chunk_payload(chunk),
         )
-        for chunk, dense, sparse in zip(chunks, dense_vectors, sparse_vectors, strict=True)
+        for chunk, dense in zip(chunks, dense_vectors, strict=True)
     ]
     if points:
         client.upsert(collection_name=settings.qdrant_collection_name, points=points)
@@ -167,7 +173,7 @@ def search_dense(
 
 
 def search_sparse(
-    sparse_vector: qmodels.SparseVector,
+    query_text: str,
     top_k: int,
     allowed_doc_ids: list[str] | None = None,
 ) -> list[RetrievedChunk]:
@@ -179,7 +185,7 @@ def search_sparse(
 
     results = client.query_points(
         collection_name=settings.qdrant_collection_name,
-        query=sparse_vector,
+        query=qmodels.Document(text=query_text, model="qdrant/bm25"),
         using="sparse",
         limit=top_k,
         query_filter=_doc_filter(allowed_doc_ids),
@@ -191,7 +197,7 @@ def search_sparse(
 
 def search_hybrid(
     dense_vector: list[float],
-    sparse_vector: qmodels.SparseVector,
+    query_text: str,
     fetch_k: int,
     allowed_doc_ids: list[str] | None = None,
 ) -> list[RetrievedChunk]:
@@ -210,7 +216,7 @@ def search_hybrid(
         collection_name=settings.qdrant_collection_name,
         prefetch=[
             qmodels.Prefetch(query=dense_vector, using="dense", limit=fetch_k, filter=doc_filter),
-            qmodels.Prefetch(query=sparse_vector, using="sparse", limit=fetch_k, filter=doc_filter),
+            qmodels.Prefetch(query=qmodels.Document(text=query_text, model="qdrant/bm25"), using="sparse", limit=fetch_k, filter=doc_filter),
         ],
         query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
         limit=fetch_k,
