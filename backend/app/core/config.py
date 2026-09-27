@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # --- App ---
     app_env: str = "development"
     log_level: str = "INFO"
+    # Append-only human-readable mirror of each QueryLog (in addition to MySQL).
+    # Relative paths resolve from backend/. Empty string disables file logging.
+    query_log_file: str = "data/query_logs.txt"
 
     # --- Chunking ---
     chunk_target_tokens: int = 500

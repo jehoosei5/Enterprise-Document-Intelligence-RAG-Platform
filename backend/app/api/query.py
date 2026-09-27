@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_accessible_doc_ids, get_current_user
 from app.core.config import get_settings
+from app.core.query_file_log import append_query_log
 from app.db.models import Conversation, QueryLog, User
 from app.db.session import SessionLocal, get_db
 from app.embeddings.azure_embeddings import embed_text
-from app.embeddings.sparse_embeddings import embed_text as sparse_embed_text
 from app.evaluation.metrics import EvaluationResult, evaluate
 from app.generation.generator import (
     StreamUsage,
@@ -79,6 +79,15 @@ def _get_history(conversation: Conversation, db: Session, settings) -> list[dict
     return [{"question": r.question, "answer": r.answer} for r in rows]
 
 
+def _save_query_log(db: Session, log: QueryLog) -> QueryLog:
+    """Persist to MySQL and mirror to the local .txt query log."""
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    append_query_log(log)
+    return log
+
+
 def _generate_and_save_conversation_title(conversation_id: str, question: str, answer: str) -> None:
     """Runs after the response has already gone out (a BackgroundTask for
     /query, called inline post-stream for /query/stream — either way,
@@ -129,21 +138,19 @@ def _run_retrieval_pipeline(
     retrieval_start = time.perf_counter()
 
     dense_future = _POOL.submit(embed_text, rewritten)
-    sparse_future = _POOL.submit(sparse_embed_text, rewritten)
     dense_vector = dense_future.result()
-    sparse_vector = sparse_future.result()
 
     if include_debug:
         debug_dense_future = _POOL.submit(
             search_dense, dense_vector, top_k=settings.debug_display_k, allowed_doc_ids=accessible_doc_ids
         )
         debug_sparse_future = _POOL.submit(
-            search_sparse, sparse_vector, top_k=settings.debug_display_k, allowed_doc_ids=accessible_doc_ids
+            search_sparse, rewritten, top_k=settings.debug_display_k, allowed_doc_ids=accessible_doc_ids
         )
         candidates_future = _POOL.submit(
             search_hybrid,
             dense_vector,
-            sparse_vector,
+            rewritten,
             fetch_k=settings.hybrid_fetch_k,
             allowed_doc_ids=accessible_doc_ids,
         )
@@ -154,7 +161,7 @@ def _run_retrieval_pipeline(
         debug_dense = []
         debug_sparse = []
         candidates = search_hybrid(
-            dense_vector, sparse_vector, fetch_k=settings.hybrid_fetch_k, allowed_doc_ids=accessible_doc_ids
+            dense_vector, rewritten, fetch_k=settings.hybrid_fetch_k, allowed_doc_ids=accessible_doc_ids
         )
 
     latency_retrieval_ms = int((time.perf_counter() - retrieval_start) * 1000)
@@ -200,9 +207,7 @@ def query(
             scoped_document_id=request.document_id,
             latency_total_ms=int((time.perf_counter() - total_start) * 1000),
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             background_tasks.add_task(
                 _generate_and_save_conversation_title, conversation.id, request.question, log.answer
@@ -242,9 +247,7 @@ def query(
             latency_llm_ms=latency_llm_ms,
             latency_total_ms=latency_total_ms,
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             background_tasks.add_task(
                 _generate_and_save_conversation_title, conversation.id, request.question, chat_result.answer
@@ -305,9 +308,7 @@ def query(
         latency_eval_ms=latency_eval_ms,
         latency_total_ms=latency_total_ms,
     )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
+    _save_query_log(db, log)
 
     if is_new_conversation:
         background_tasks.add_task(
@@ -351,9 +352,7 @@ def query_stream(
                 model=settings.azure_openai_chat_deployment,
                 latency_total_ms=int((time.perf_counter() - total_start) * 1000),
             )
-            db.add(log)
-            db.commit()
-            db.refresh(log)
+            _save_query_log(db, log)
             if is_new_conversation:
                 _generate_and_save_conversation_title(conversation.id, request.question, answer)
             yield f"data: {json.dumps({'delta': answer})}\n\n"
@@ -385,9 +384,7 @@ def query_stream(
                 latency_llm_ms=latency_llm_ms,
                 latency_total_ms=latency_total_ms,
             )
-            db.add(log)
-            db.commit()
-            db.refresh(log)
+            _save_query_log(db, log)
             if is_new_conversation:
                 _generate_and_save_conversation_title(conversation.id, request.question, full_text)
 
@@ -451,9 +448,7 @@ def query_stream(
             latency_eval_ms=latency_eval_ms,
             latency_total_ms=latency_total_ms,
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
+        _save_query_log(db, log)
         if is_new_conversation:
             _generate_and_save_conversation_title(conversation.id, request.question, full_text)
 
