@@ -16,7 +16,7 @@ openai==1.58.1
 tiktoken==0.8.0
 
 # --- Vector store (dense + sparse/BM25 hybrid) ---
-qdrant-client==1.12.1
+qdrant-client==1.19.1
 
 # --- Reranker ---
 cohere==5.13.4
