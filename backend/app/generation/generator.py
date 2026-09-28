@@ -228,7 +228,7 @@ def stream_answer(
         if chunk.usage is not None:
             usage_out.input_tokens = chunk.usage.prompt_tokens
             usage_out.output_tokens = chunk.usage.completion_tokens
-        if chunk.choices and chunk.choices[0].delta.content:
+        if chunk.choices and chunk.choices[0].delta is not None and chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
 
 
@@ -249,5 +249,5 @@ def stream_chat_reply(
         if chunk.usage is not None:
             usage_out.input_tokens = chunk.usage.prompt_tokens
             usage_out.output_tokens = chunk.usage.completion_tokens
-        if chunk.choices and chunk.choices[0].delta.content:
+        if chunk.choices and chunk.choices[0].delta is not None and chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
